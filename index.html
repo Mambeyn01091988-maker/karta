@@ -375,7 +375,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 15 — плавающая шапка таблиц</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 16 — работа без интернета</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -1677,12 +1677,25 @@ async function bootSession(){
     showBlocked();
     return;
   }
-  await reloadAll();
-  ONLINE.ready = true;
-  applyRows(ONLINE.rows);
-  refreshAll(); renderAuthBar();
-  buildWatermark();
-  logAccess('open');
+  try {
+    await reloadAll();
+    ONLINE.ready = true; ONLINE.offline = false;
+    applyRows(ONLINE.rows);
+    refreshAll(); renderAuthBar();
+    buildWatermark();
+    logAccess('open');
+    saveCache();                       // сохраняем для работы без интернета
+    flushQueue();                      // и досылаем то, что накопилось
+  } catch (e) {
+    // нет связи — работаем по сохранённым данным
+    const c = loadCache();
+    if (!c || !c.rows || !c.rows.length){ ONLINE.error = e.message || String(e); renderAuthBar(); return; }
+    ONLINE.rows = c.rows; ONLINE.assemblies = c.assemblies || []; ONLINE.diagrams = c.diagrams || [];
+    ONLINE.profile = ONLINE.profile || c.profile || { email: ONLINE.user && ONLINE.user.email, role: 'viewer', active: true };
+    ONLINE.ready = true; ONLINE.offline = true;
+    applyRows(ONLINE.rows);
+    refreshAll(); renderAuthBar(); buildWatermark();
+  }
 }
 async function loadProfile(){
   const { data } = await ONLINE.client.from('profiles').select('*').eq('id', ONLINE.user.id).maybeSingle();
@@ -1857,8 +1870,13 @@ function cmpKey(a, b){
 function renderAuthBar(){
   const bar = $('authbar');
   const live = ONLINE.ready
-    ? '<span class="dot-live" title="живое обновление включено"></span>'
+    ? (ONLINE.offline
+        ? '<span class="dot-live dot-off" title="нет связи — данные из памяти телефона"></span>'
+        : '<span class="dot-live" title="живое обновление включено"></span>')
     : '<span class="dot-live dot-off" title="офлайн-режим: данные вшиты в файл"></span>';
+  const offNote = ONLINE.offline
+    ? `<span class="who" style="color:#c98a00">офлайн — из памяти${(() => { const c = loadCache(); return c && c.at ? ', ' + new Date(c.at).toLocaleString('ru-RU') : ''; })()}</span>`
+    : '';
   if (!ONLINE.enabled){
     bar.innerHTML = live + '<span class="who">офлайн-версия · данные в файле</span>';
     return;
@@ -1872,7 +1890,7 @@ function renderAuthBar(){
     return;
   }
   if (ONLINE.user){
-    bar.innerHTML = live
+    bar.innerHTML = live + offNote
       + `<span class="who">${esc(ONLINE.profile && (ONLINE.profile.full_name || ONLINE.profile.email) || ONLINE.user.email || '')}</span>`
       + `<span class="role" title="${escAttr(ROLE_HINT[myRole()])}">${ROLE_TITLE[myRole()] || myRole()}</span>`
       + (canAdmin() ? '<button class="btn" id="btnAccess">Доступы и журнал</button>' : '')
@@ -1974,8 +1992,21 @@ function openAuth(){
 /* ------------------------------- сверка ---------------------------------- */
 async function setVerified(row, ok){
   const note = ok ? (prompt('Комментарий к сверке (необязательно):', row.verifyNote || '') || '') : '';
-  const { error } = await ONLINE.client.rpc('set_verified', { p_id: row.id, p_ok: ok, p_note: note });
-  if (error){ alert('Не удалось сохранить отметку: ' + error.message); return; }
+  let error = null;
+  try {
+    const r = await ONLINE.client.rpc('set_verified', { p_id: row.id, p_ok: ok, p_note: note });
+    error = r.error;
+    if (error){ const q = queued(); q.push({ id: row.id, ok, note, at: Date.now() }); setQueue(q); throw new Error('queued'); }
+  } catch (e) {
+    if (String(e.message) !== 'queued'){
+      const q = queued(); q.push({ id: row.id, ok, note, at: Date.now() }); setQueue(q);
+    }
+    row.verifiedAt = ok ? new Date().toISOString() : null;
+    row.verifyNote = note;
+    renderCard(); refreshAll();
+    alert('Связи нет. Отметка сохранена в телефоне и уйдёт на сервер, как только появится интернет.');
+    return;
+  }
   await reloadAll(); applyRows(ONLINE.rows); refreshAll();
 }
 
@@ -2336,6 +2367,42 @@ function hideBlocked(){
   if (el) el.classList.remove('open');
 }
 /* запись в журнал: кто и когда открыл схему */
+/* ---------------- офлайн: кеш данных и очередь изменений ---------------- */
+const CACHE_KEY = 'karta-cache-v1', QUEUE_KEY = 'karta-queue-v1';
+function saveCache(){
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      at: Date.now(), profile: ONLINE.profile,
+      rows: ONLINE.rows, assemblies: ONLINE.assemblies,
+      diagrams: (ONLINE.diagrams || []).map(d => ({ ...d }))
+    }));
+  } catch (e) { /* места может не хватить — не критично */ }
+}
+function loadCache(){
+  try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch (e) { return null; }
+}
+function queued(){ try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); } catch (e) { return []; } }
+function setQueue(q){ try { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); } catch (e) {} }
+/* отправляем накопленные отметки, когда связь появилась */
+async function flushQueue(){
+  if (!ONLINE.ready || ONLINE.offline || !ONLINE.user) return;
+  const q = queued();
+  if (!q.length) return;
+  const left = [];
+  for (const it of q){
+    try {
+      const { error } = await ONLINE.client.rpc('set_verified', { p_id: it.id, p_ok: it.ok, p_note: it.note });
+      if (error) left.push(it);
+    } catch (e) { left.push(it); }
+  }
+  setQueue(left);
+  if (left.length !== q.length){
+    await reloadAll(); applyRows(ONLINE.rows); refreshAll();
+    alert(`Отправлено отметок: ${q.length - left.length}. Осталось в очереди: ${left.length}.`);
+  }
+}
+window.addEventListener('online', () => { ONLINE.offline = false; flushQueue(); });
+
 async function logAccess(action){
   if (!ONLINE.ready || !ONLINE.user) return;
   try {
@@ -3167,6 +3234,9 @@ function renderWarnBadges(){
 }
 
 renderWarnBadges();
+if ('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
 initOnline();
 
 </script>
