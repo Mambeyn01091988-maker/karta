@@ -375,7 +375,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 11 — схемы открываются на телефоне</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 12 — схемы картинками</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -2647,7 +2647,9 @@ function stationDiagrams(st){
   if (ONLINE.ready){
     return ONLINE.diagrams.filter(d => d.station_id === st.id && !d.deleted_at).map(d => ({
       title: d.title || 'Однолинейная схема', date: d.diagram_date || '',
-      room: d.room_number || '', place: '', url: d.url || '', file: '', img: ''
+      room: d.room_number || '', place: '', url: d.url || '', file: '',
+      // картинка рядом с PDF — показывается прямо в карте, без PDF-просмотрщика
+      img: (d.url || '').replace(/\.pdf$/i, '.jpg')
     }));
   }
   const out = [];
