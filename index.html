@@ -375,7 +375,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 13 — журнал изменений</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 14 — журнал с должностями</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -2373,6 +2373,22 @@ async function openAccess(tab){
     <div id="acBody"></div>`;
   mBody.querySelectorAll('.tab').forEach(b => b.onclick = () => openAccess(b.dataset.at));
   const box = $('acBody');
+  // должность и имя берём из списка допущенных, почту показываем ниже
+  const NOTE = {}, NAME = {};
+  try {
+    const [ae, pr] = await Promise.all([
+      ONLINE.client.from('allowed_emails').select('email,note'),
+      ONLINE.client.from('profiles').select('email,full_name')
+    ]);
+    (ae.data || []).forEach(x => { if (x.note) NOTE[String(x.email).toLowerCase()] = x.note; });
+    (pr.data || []).forEach(x => { if (x.full_name && x.full_name !== x.email) NAME[String(x.email).toLowerCase()] = x.full_name; });
+  } catch (e) { /* подписи не критичны */ }
+  window.whoLabel = (mail) => {
+    const k = String(mail || '').toLowerCase();
+    const label = NOTE[k] || NAME[k] || '';
+    if (!label) return esc(mail || 'система');
+    return `<b>${esc(label)}</b><br><span style="color:var(--muted);font-size:11.5px">${esc(mail)}</span>`;
+  };
   if (accessTab === 'log'){
     const { data, error } = await ONLINE.client.from('access_log')
       .select('*').order('at', { ascending: false }).limit(500);
@@ -2388,7 +2404,7 @@ async function openAccess(tab){
           <thead><tr><th>Когда</th><th>Кто</th><th>Действие</th><th>Устройство</th><th>Сеть</th></tr></thead>
           <tbody>${rows.map(r => `<tr>
             <td>${esc(new Date(r.at).toLocaleString('ru-RU'))}</td>
-            <td>${esc(r.email || '')}</td>
+            <td>${whoLabel(r.email)}</td>
             <td>${esc(r.action || '')}</td>
             <td title="${escAttr(r.user_agent || '')}">${esc(shortAgent(r.user_agent))}</td>
             <td>${esc(r.ip || '—')}</td></tr>`).join('')}</tbody></table>`
@@ -2416,7 +2432,7 @@ async function openAccess(tab){
         <thead><tr><th>Когда</th><th>Кто</th><th>Что</th><th>Действие</th><th>Поле</th><th>Было</th><th>Стало</th></tr></thead>
         <tbody>${list.map(r => `<tr>
           <td>${esc(new Date(r.at).toLocaleString('ru-RU'))}</td>
-          <td>${esc(r.actor_email || 'система')}</td>
+          <td>${whoLabel(r.actor_email)}</td>
           <td>${esc(kind[r.entity] || r.entity || '')}</td>
           <td>${esc(act[r.action] || r.action || '')}</td>
           <td>${esc(r.field || '')}</td>
@@ -2436,9 +2452,10 @@ async function openAccess(tab){
       draw('');
       $('chSearch').addEventListener('input', (e) => draw(e.target.value));
       $('chCsv').onclick = () => {
-        const head = ['Когда', 'Кто', 'Что', 'Действие', 'Поле', 'Было', 'Стало'];
+        const head = ['Когда', 'Кто (должность, имя)', 'Почта', 'Что', 'Действие', 'Поле', 'Было', 'Стало'];
         const lines = [head.join(';')].concat(rows.map(r => [new Date(r.at).toLocaleString('ru-RU'),
-          r.actor_email || '', kind[r.entity] || r.entity || '', act[r.action] || r.action || '',
+          NOTE[String(r.actor_email || '').toLowerCase()] || '', r.actor_email || '',
+          kind[r.entity] || r.entity || '', act[r.action] || r.action || '',
           r.field || '', r.old_value || '', r.new_value || '']
           .map(v => `"${String(v).replace(/"/g, '""')}"`).join(';')));
         downloadCsv(lines.join('\r\n'), 'zhurnal-izmeneniy.csv');
