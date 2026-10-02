@@ -1886,7 +1886,7 @@ function renderAuthBar(){
     if (ba) ba.onclick = () => openAccess('log');
   } else {
     bar.innerHTML = live + '<button class="btn primary" id="btnIn">Войти для правки</button>';
-    $('btnIn').onclick = openAuth;
+    $('btnIn').onclick = () => openAuthPassword('');
   }
 }
 /* вход по паролю — без писем и лимитов */
@@ -1899,10 +1899,13 @@ function openAuthPassword(email){
       <input id="pwEmail" type="email" value="${escAttr(email || '')}" autocomplete="username"></div>
     <div class="fld" style="max-width:380px;margin-top:8px"><label>Пароль</label>
       <input id="pwPass" type="password" autocomplete="current-password"></div>
-    <div class="note">Пароль можно получить у администратора схемы.</div>`;
+    <div class="note">Пароль выдаёт администратор схемы.
+      <a href="#" id="pwByMail" style="color:var(--accent)">Войти по ссылке из письма</a></div>`;
   mFoot.innerHTML = `<button class="btn" id="pwCancel">Отмена</button><span class="spacer"></span>
     <button class="btn primary" id="pwGo">Войти</button>`;
   $('pwCancel').onclick = closeModal;
+  const pm = $('pwByMail');
+  if (pm) pm.onclick = (e) => { e.preventDefault(); openAuth(); };
   $('pwGo').onclick = async () => {
     const em = ($('pwEmail').value || '').trim(), pw = $('pwPass').value || '';
     if (!em || !pw) return;
@@ -2264,7 +2267,7 @@ function showGate(notConfigured){
     : `<div class="blocked-card">
       <div class="blocked-ico">🔐</div>
       <h2>Схема доступна после входа</h2>
-      <p>Введите рабочую почту — придёт ссылка для входа, пароль не нужен.</p>
+      <p>Нажмите «Войти» и введите <b>почту и пароль</b>, выданные администратором.</p>
       <p class="muted">Сведения хранятся на сервере и передаются только сотрудникам, которым разрешён доступ.
         Копия этой страницы без входа не содержит данных об оборудовании.</p>
       <button class="btn primary" id="gateIn">Войти</button>
