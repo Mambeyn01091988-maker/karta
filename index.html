@@ -375,7 +375,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 9 — вход по паролю</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 10 — вход только по паролю</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -1899,13 +1899,10 @@ function openAuthPassword(email){
       <input id="pwEmail" type="email" value="${escAttr(email || '')}" autocomplete="username"></div>
     <div class="fld" style="max-width:380px;margin-top:8px"><label>Пароль</label>
       <input id="pwPass" type="password" autocomplete="current-password"></div>
-    <div class="note">Пароль выдаёт администратор схемы.
-      <a href="#" id="pwByMail" style="color:var(--accent)">Войти по ссылке из письма</a></div>`;
+    <div class="note">Пароль выдаёт администратор схемы. Если забыли — обратитесь к нему.</div>`;
   mFoot.innerHTML = `<button class="btn" id="pwCancel">Отмена</button><span class="spacer"></span>
     <button class="btn primary" id="pwGo">Войти</button>`;
   $('pwCancel').onclick = closeModal;
-  const pm = $('pwByMail');
-  if (pm) pm.onclick = (e) => { e.preventDefault(); openAuth(); };
   $('pwGo').onclick = async () => {
     const em = ($('pwEmail').value || '').trim(), pw = $('pwPass').value || '';
     if (!em || !pw) return;
@@ -2267,7 +2264,7 @@ function showGate(notConfigured){
     : `<div class="blocked-card">
       <div class="blocked-ico">🔐</div>
       <h2>Схема доступна после входа</h2>
-      <p>Нажмите «Войти» и введите <b>почту и пароль</b>, выданные администратором.</p>
+      <p>Нажмите «Войти» и введите <b>почту и пароль</b>. Пароль выдаёт администратор схемы.</p>
       <p class="muted">Сведения хранятся на сервере и передаются только сотрудникам, которым разрешён доступ.
         Копия этой страницы без входа не содержит данных об оборудовании.</p>
       <button class="btn primary" id="gateIn">Войти</button>
