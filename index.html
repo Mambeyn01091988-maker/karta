@@ -375,7 +375,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 10 — вход только по паролю</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 11 — схемы открываются на телефоне</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -2719,7 +2719,24 @@ function openDiagram(d){
     $('editOverlay').classList.add('open');
     return;
   }
-  if (d && d.url){ window.open(d.url, '_blank'); return; }
+  if (d && d.url){
+    // на телефонах всплывающие окна часто блокируются — тогда открываем в этой же вкладке
+    let w = null;
+    try { w = window.open(d.url, '_blank'); } catch (e) { w = null; }
+    if (!w){
+      eCrumb.innerHTML = 'Однолинейная схема';
+      eTitle.textContent = d.title || 'Однолинейная схема';
+      eSub.innerHTML = 'Если схема не открылась автоматически — нажмите кнопку ниже';
+      eBody.innerHTML = `<div class="empty">Файл схемы: <b>${esc((d.path || '').split('/').pop() || 'PDF')}</b><br>
+        <a class="btn primary" href="${escAttr(d.url)}" target="_blank" rel="noopener"
+           style="display:inline-block;margin-top:12px;text-decoration:none">Открыть схему</a>
+        <div style="margin-top:10px"><a href="${escAttr(d.url)}" download>Скачать PDF</a></div></div>`;
+      eFoot.innerHTML = `<button class="btn" id="diaBack2">← Назад</button>`;
+      $('diaBack2').onclick = closeEdit;
+      $('editOverlay').classList.add('open');
+    }
+    return;
+  }
   const src = d && d.data;
   if (!src){
     if (d && d.file) window.open(encodeURI(d.file), '_blank');
