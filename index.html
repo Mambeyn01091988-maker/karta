@@ -2415,8 +2415,9 @@ async function openAccess(tab){
             ${['viewer', 'verifier', 'editor', 'admin'].map(r => `<option value="${r}">${ROLE_TITLE[r]}</option>`).join('')}
           </select></div>
           <div class="fld"><label>Пометка</label><input id="invNote" placeholder="должность, подразделение"></div>
+          <div class="fld"><label>Пароль для входа</label><input id="invPass" placeholder="например saven2026"></div>
         </div>
-        <div style="margin-top:10px"><button class="btn primary" id="invAdd">Добавить в список допущенных</button></div>
+        <div style="margin-top:10px"><button class="btn primary" id="invAdd">Создать доступ и пароль</button></div>
         <div class="note">Публичная регистрация выключена: войти сможет только почта из этого списка.
           Пока сотрудник не вошёл, он появится ниже как «приглашён».</div>
       </div>
@@ -2429,7 +2430,8 @@ async function openAccess(tab){
           `<option value="${r}" ${p.role === r ? 'selected' : ''}>${ROLE_TITLE[r]}</option>`).join('')}</select></td>
         <td>${p.active ? '<span class="badge ok">разрешён</span>' : '<span class="badge bad">заблокирован</span>'}</td>
         <td>${esc(p.last_seen_at ? new Date(p.last_seen_at).toLocaleString('ru-RU') : '—')}</td>
-        <td class="rowact"><button class="iconbtn ${p.active ? 'danger' : 'on'}" data-act="${escAttr(p.id)}"
+        <td class="rowact"><button class="iconbtn" data-pw="${escAttr(p.email || '')}">Пароль</button>
+          <button class="iconbtn ${p.active ? 'danger' : 'on'}" data-act="${escAttr(p.id)}"
           data-on="${p.active ? '0' : '1'}">${p.active ? 'Заблокировать' : 'Разрешить'}</button></td>
       </tr>`).join('') || '<tr><td colspan="5"><div class="empty">Пока никто не входил</div></td></tr>'}</tbody></table></div>
       <h3 style="margin:16px 0 8px">Приглашения (${invites.length})</h3>
@@ -2441,12 +2443,28 @@ async function openAccess(tab){
         || '<tr><td colspan="4"><div class="empty">Список пуст — никто, кроме вас, войти не сможет</div></td></tr>'}</tbody></table></div>`;
     $('invAdd').onclick = async () => {
       const email = ($('invEmail').value || '').trim().toLowerCase();
+      const pass = ($('invPass').value || '').trim();
       if (!email){ alert('Укажите почту'); return; }
-      const { error } = await ONLINE.client.from('allowed_emails')
-        .upsert({ email, role: $('invRole').value, note: $('invNote').value.trim() }, { onConflict: 'email' });
-      if (error){ alert('Не удалось добавить: ' + error.message); return; }
+      if (pass && pass.length < 6){ alert('Пароль слишком короткий — минимум 6 символов'); return; }
+      $('invAdd').disabled = true;
+      const { data, error } = await ONLINE.client.rpc('admin_upsert_user',
+        { p_email: email, p_password: pass, p_role: $('invRole').value, p_note: $('invNote').value.trim() });
+      $('invAdd').disabled = false;
+      if (error){ alert('Не удалось: ' + error.message); return; }
+      alert(String(data) + (pass ? '\n\nПароль: ' + pass + '\nПередайте его сотруднику лично.' : '\n\nПароль не задан — сотрудник войдёт по ссылке из письма.'));
       openAccess('people');
     };
+    box.querySelectorAll('[data-pw]').forEach(b => b.onclick = async () => {
+      const em = b.dataset.pw;
+      const p1 = prompt('Новый пароль для ' + em + ' (минимум 6 символов):', '');
+      if (!p1) return;
+      if (p1.length < 6){ alert('Слишком короткий пароль'); return; }
+      const { data, error } = await ONLINE.client.rpc('admin_upsert_user',
+        { p_email: em, p_password: p1, p_role: '', p_note: null });
+      if (error){ alert('Не удалось: ' + error.message); return; }
+      alert('Пароль изменён.\n\n' + em + '\nПароль: ' + p1 + '\n\nПередайте его сотруднику лично.');
+      openAccess('people');
+    });
     box.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
       const { error } = await ONLINE.client.from('profiles')
         .update({ active: b.dataset.on === '1' }).eq('id', b.dataset.act);
