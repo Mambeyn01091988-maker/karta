@@ -375,7 +375,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 17 — ниши в технических помещениях</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 18 — ТО и ТР</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -1686,6 +1686,7 @@ async function bootSession(){
     logAccess('open');
     saveCache();                       // сохраняем для работы без интернета
     flushQueue();                      // и досылаем то, что накопилось
+    loadMaint();                       // классы помещений, отметки ТО и ТР, календарь
   } catch (e) {
     // нет связи — работаем по сохранённым данным
     const c = loadCache();
@@ -3234,8 +3235,226 @@ function renderWarnBadges(){
 }
 
 renderWarnBadges();
+/* ======================= ТО и ТР ======================= */
+const TO_RULES = { heat:{to:14, tr:90, title:'с теплоизбытками'}, cold:{to:30, tr:180, title:'без теплоизбытков'}, depot:{to:365, tr:180, title:'депо, АБК'} };
+ONLINE.classes = Object.create(null);
+ONLINE.mlast = Object.create(null);
+ONLINE.maint = [];
+ONLINE.hol = null;
+ONLINE.maintLoaded = false;
+
+function isoLocal(d){ const p = n => String(n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); }
+function parseIso(s){ const a = String(s).slice(0,10).split('-').map(Number); return new Date(a[0], a[1]-1, a[2]); }
+function addDaysD(d,n){ const x = new Date(d.getTime()); x.setDate(x.getDate()+n); return x; }
+function isWorkday(d){
+  const k = isoLocal(d);
+  if (ONLINE.hol){
+    if (ONLINE.hol.work.has(k)) return true;
+    if (ONLINE.hol.nowork.has(k)) return false;
+  }
+  const w = d.getDay(); return w !== 0 && w !== 6;
+}
+function workdayBefore(d){ let x = new Date(d.getTime()); for (let i=0;i<40;i++){ if (isWorkday(x)) return x; x = addDaysD(x,-1); } return d; }
+
+async function loadMaint(){
+  if (!ONLINE.client) return;
+  try {
+    const [rc, ml, hl] = await Promise.all([
+      ONLINE.client.from('room_class').select('station_id,room_number,class').limit(5000),
+      ONLINE.client.from('maintenance').select('id,station_id,room_number,kind,done_at,note,file_path,file_name,file_type,done_email').order('done_at',{ascending:false}).limit(3000),
+      ONLINE.client.from('holidays').select('day,kind').limit(1000)
+    ]);
+    (rc.data||[]).forEach(x => { ONLINE.classes[x.station_id+'|'+x.room_number] = x.class; });
+    ONLINE.maint = ml.data || [];
+    ONLINE.mlast = Object.create(null);
+    ONLINE.maint.forEach(m => {
+      const k = m.station_id+'|'+m.room_number+'|'+m.kind;
+      if (!ONLINE.mlast[k] || String(m.done_at) > String(ONLINE.mlast[k].done_at)) ONLINE.mlast[k] = m;
+    });
+    const nowork = new Set(), work = new Set();
+    (hl.data||[]).forEach(x => { if (x.kind === 'workday') work.add(x.day); else if (x.kind !== 'short') nowork.add(x.day); });
+    ONLINE.hol = { nowork, work };
+    ONLINE.maintLoaded = true;
+  } catch(e){ ONLINE.maintLoaded = false; }
+}
+function classOf(sid, room){ return ONLINE.classes[sid+'|'+room] || 'cold'; }
+function statusOf(sid, room, kind){
+  const cls = classOf(sid, room), r = TO_RULES[cls] || TO_RULES.cold;
+  const iv = (kind === 'ТО') ? r.to : r.tr;
+  const last = ONLINE.mlast[sid+'|'+room+'|'+kind];
+  if (!last) return { cls, iv, last:null, due:null, diff:null, state:'none' };
+  const due = workdayBefore(addDaysD(parseIso(last.done_at), iv));
+  const diff = Math.round((due - parseIso(isoLocal(new Date()))) / 86400000);
+  return { cls, iv, last, due: isoLocal(due), diff, state: diff < 0 ? 'late' : (diff <= 7 ? 'soon' : 'ok') };
+}
+const TO_STATE = { none:{t:'не начато', c:'#8b98a8', bg:'#eef2f6'}, ok:{t:'в срок', c:'#1a7f4b', bg:'#e6f5ec'},
+  soon:{t:'на этой неделе', c:'#9a6b00', bg:'#fff4d6'}, late:{t:'просрочено', c:'#b3261e', bg:'#fde8e6'} };
+
+function toRooms(){
+  const map = new Map();
+  (ONLINE.rows||[]).forEach(r => {
+    const k = r.station_id + '|' + (r.room_number || '');
+    if (!map.has(k)) map.set(k, { sid:r.station_id, room:r.room_number || '', place:r.place || '', group:r.group_name || '', units:0 });
+    map.get(k).units++;
+  });
+  return [...map.values()];
+}
+function stationNameOf(sid){
+  const st = (typeof STATIONS !== 'undefined' ? STATIONS : []).find(s => s.id === sid);
+  return st ? st.name : sid;
+}
+function toRows(){
+  return toRooms().map(x => {
+    const to = statusOf(x.sid, x.room, 'ТО'), tr = statusOf(x.sid, x.room, 'ТР');
+    const rank = (s) => s === 'late' ? 0 : (s === 'soon' ? 1 : (s === 'none' ? 2 : 3));
+    return { ...x, to, tr, rank: Math.min(rank(to.state), rank(tr.state)) };
+  });
+}
+let toFilter = 'all', toQuery = '';
+function drawTO(){
+  const ov = $('toOverlay'); if (!ov) return;
+  const all = toRows();
+  const late = all.filter(x => x.to.state === 'late' || x.tr.state === 'late').length;
+  const soon = all.filter(x => (x.to.state === 'soon' || x.tr.state === 'soon') && x.to.state !== 'late' && x.tr.state !== 'late').length;
+  const none = all.filter(x => x.to.state === 'none' && x.tr.state === 'none').length;
+  const q = toQuery.trim().toLowerCase();
+  let list = all.filter(x => {
+    if (toFilter === 'late' && !(x.to.state === 'late' || x.tr.state === 'late')) return false;
+    if (toFilter === 'soon' && !(x.to.state === 'soon' || x.tr.state === 'soon')) return false;
+    if (toFilter === 'none' && !(x.to.state === 'none' && x.tr.state === 'none')) return false;
+    if (q && !(stationNameOf(x.sid) + ' ' + x.room + ' ' + x.place + ' ' + x.group).toLowerCase().includes(q)) return false;
+    return true;
+  }).sort((a,b) => a.rank - b.rank || stationNameOf(a.sid).localeCompare(stationNameOf(b.sid)));
+  const shown = list.slice(0, 250);
+  const cell = (s, kind, x) => {
+    const st = TO_STATE[s.state];
+    const when = s.due ? (s.state === 'late' ? `просрочено на ${-s.diff} дн.` : `до ${s.due.split('-').reverse().join('.')}`) : 'нет данных';
+    return `<td style="padding:6px 8px;border-bottom:1px solid #e6ecf2">
+      <span style="display:inline-block;padding:2px 8px;border-radius:10px;background:${st.bg};color:${st.c};font-size:11.5px;font-weight:600">${st.t}</span>
+      <div style="font-size:11.5px;color:#6b7885;margin-top:3px">${when}</div>
+      <button class="btn" data-done="${x.sid}|${escAttr(x.room)}|${kind}" style="margin-top:4px;font-size:12px;padding:3px 10px">Выполнено</button></td>`;
+  };
+  ov.innerHTML = `<div style="max-width:1200px;margin:0 auto">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <h2 style="margin:0;font-size:19px">ТО и ТР</h2>
+      <span class="chip" style="background:#fde8e6;color:#b3261e">просрочено: ${late}</span>
+      <span class="chip" style="background:#fff4d6;color:#9a6b00">на неделе: ${soon}</span>
+      <span class="chip" style="background:#eef2f6;color:#5b6875">не начато: ${none}</span>
+      <span style="flex:1"></span>
+      <button class="btn" id="toClose">Закрыть</button>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <input id="toQ" type="search" placeholder="Поиск: станция, помещение, место…" value="${escAttr(toQuery)}"
+        style="flex:1;min-width:200px;padding:9px 12px;border:1px solid #cdd7e2;border-radius:10px">
+      ${['all|Все', 'late|Просрочено', 'soon|Эта неделя', 'none|Не начато'].map(s => {
+        const [v, t] = s.split('|');
+        return `<button class="btn ${toFilter === v ? 'primary' : ''}" data-tf="${v}">${t}</button>`; }).join('')}
+      <button class="btn" id="toCsv">Экспорт в CSV</button>
+    </div>
+    ${!ONLINE.maintLoaded ? '<div class="empty">Нет связи с базой — данные по ТО и ТР не загружены.</div>' : ''}
+    <div style="overflow:auto;max-height:calc(100vh - 220px);border:1px solid #e6ecf2;border-radius:12px;background:#fff">
+      <table class="tbl" style="width:100%;border-collapse:separate;border-spacing:0;font-size:13px">
+        <thead><tr style="background:#f2f6fa;text-align:left">
+          <th style="padding:8px;position:sticky;top:0;background:#f2f6fa">Станция</th>
+          <th style="padding:8px;position:sticky;top:0;background:#f2f6fa">Помещение</th>
+          <th style="padding:8px;position:sticky;top:0;background:#f2f6fa">Класс</th>
+          <th style="padding:8px;position:sticky;top:0;background:#f2f6fa">ТО</th>
+          <th style="padding:8px;position:sticky;top:0;background:#f2f6fa">ТР</th>
+        </tr></thead><tbody>
+        ${shown.map(x => `<tr>
+          <td style="padding:6px 8px;border-bottom:1px solid #e6ecf2">${esc(stationNameOf(x.sid))}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #e6ecf2"><b>${esc(x.room || '—')}</b>
+            <div style="font-size:11.5px;color:#6b7885">${esc(x.place || '')}${x.units ? ' · ' + x.units + ' ед.' : ''}</div></td>
+          <td style="padding:6px 8px;border-bottom:1px solid #e6ecf2;font-size:12px;color:#4a5866">${TO_RULES[x.to.cls].title}
+            <div style="font-size:11px;color:#8b98a8">ТО ${x.to.iv} дн · ТР ${x.tr.iv} дн</div></td>
+          ${cell(x.to, 'ТО', x)}${cell(x.tr, 'ТР', x)}</tr>`).join('')}
+      </tbody></table>
+      ${!shown.length ? '<div class="empty">Ничего не найдено</div>' : ''}
+      ${list.length > shown.length ? `<div class="empty">Показано ${shown.length} из ${list.length} — уточните поиск</div>` : ''}
+    </div>
+  </div>`;
+  $('toClose').onclick = () => { ov.style.display = 'none'; };
+  $('toQ').oninput = (e) => { toQuery = e.target.value; const p = e.target.selectionStart; drawTO(); const n = $('toQ'); if (n){ n.focus(); n.setSelectionRange(p, p); } };
+  ov.querySelectorAll('[data-tf]').forEach(b => b.onclick = () => { toFilter = b.dataset.tf; drawTO(); });
+  ov.querySelectorAll('[data-done]').forEach(b => b.onclick = () => {
+    const [sid, room, kind] = b.dataset.done.split('|');
+    openMarkForm(sid, room, kind);
+  });
+  $('toCsv').onclick = () => {
+    const head = ['Станция','Помещение','Место','Класс','ТО последнее','ТО срок','ТО статус','ТР последнее','ТР срок','ТР статус'];
+    const lines = [head.join(';')].concat(list.map(x => [stationNameOf(x.sid), x.room, x.place, TO_RULES[x.to.cls].title,
+      x.to.last ? x.to.last.done_at : '', x.to.due || '', TO_STATE[x.to.state].t,
+      x.tr.last ? x.tr.last.done_at : '', x.tr.due || '', TO_STATE[x.tr.state].t]
+      .map(v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"').join(';')));
+    downloadCsv(lines.join('\r\n'), 'to-tr.csv');
+  };
+}
+function openMarkForm(sid, room, kind){
+  const ov = $('toOverlay'); if (!ov) return;
+  const cls = classOf(sid, room), r = TO_RULES[cls] || TO_RULES.cold;
+  const st = statusOf(sid, room, kind);
+  ov.innerHTML = `<div style="max-width:620px;margin:0 auto">
+    <h2 style="margin:0 0 4px;font-size:19px">${kind} — ${esc(stationNameOf(sid))}, пом. ${esc(room || '—')}</h2>
+    <div style="color:#6b7885;font-size:13px;margin-bottom:14px">${r.title} · ${kind === 'ТО' ? r.to + ' дней' : r.tr + ' дней'}
+      ${st.last ? ' · последнее: ' + String(st.last.done_at).split('-').reverse().join('.') : ''}</div>
+    <div style="display:grid;gap:12px">
+      <label style="display:grid;gap:5px;font-size:13px;color:#4a5866">Дата выполнения
+        <input id="mkDate" type="date" value="${isoLocal(new Date())}" style="padding:10px 12px;border:1px solid #cdd7e2;border-radius:10px;font-size:15px"></label>
+      <label style="display:grid;gap:5px;font-size:13px;color:#4a5866">Примечание
+        <input id="mkNote" type="text" placeholder="необязательно" style="padding:10px 12px;border:1px solid #cdd7e2;border-radius:10px;font-size:15px"></label>
+      <label style="display:grid;gap:5px;font-size:13px;color:#4a5866">
+        ${kind === 'ТР' ? '<b>Протокол ТР — обязателен</b> (фото или PDF)' : 'Файл (необязательно)'}
+        <input id="mkFile" type="file" accept="image/*,application/pdf" capture="environment" style="font-size:14px">
+        <span style="font-size:12px;color:#8b98a8">На телефоне можно снять камерой или выбрать PDF из файлов</span></label>
+    </div>
+    <div id="mkErr" style="color:#b3261e;font-size:13px;margin-top:10px"></div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn primary" id="mkSave" style="padding:12px 22px;font-size:15px">Сохранить</button>
+      <button class="btn" id="mkBack" style="padding:12px 22px;font-size:15px">← Назад</button>
+    </div></div>`;
+  $('mkBack').onclick = drawTO;
+  $('mkSave').onclick = async () => {
+    const date = $('mkDate').value, note = $('mkNote').value.trim();
+    const file = ($('mkFile').files || [])[0];
+    const err = $('mkErr'); err.textContent = '';
+    if (!date){ err.textContent = 'Укажите дату'; return; }
+    if (kind === 'ТР' && !file){ err.textContent = 'Для ТР нужно приложить протокол (фото или PDF)'; return; }
+    $('mkSave').disabled = true; $('mkSave').textContent = 'Сохраняем…';
+    let file_path = null, file_type = null, file_name = null;
+    try {
+      if (file){
+        if (file.size > 12 * 1024 * 1024){ throw new Error('Файл больше 12 МБ — уменьшите фото'); }
+        const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+        file_path = 'maintenance/' + sid + '/' + (room || 'room').replace(/[^\w.-]+/g, '_') + '/' + kind + '-' + Date.now() + '.' + ext;
+        const up = await ONLINE.client.storage.from('equipment-photos').upload(file_path, file, { upsert:false });
+        if (up.error) throw new Error('Не удалось загрузить файл: ' + up.error.message);
+        file_type = (file.type || '').includes('pdf') ? 'pdf' : 'photo';
+        file_name = file.name;
+      }
+      const ins = await ONLINE.client.from('maintenance').insert({
+        station_id: sid, room_number: room || '', kind, done_at: date, note,
+        done_by: ONLINE.user && ONLINE.user.id, done_email: ONLINE.profile ? ONLINE.profile.email : '',
+        file_path, file_type, file_name
+      });
+      if (ins.error) throw new Error(ins.error.message);
+      await loadMaint(); drawTO();
+      alert(kind + ' отмечено: ' + date.split('-').reverse().join('.'));
+    } catch (e) {
+      $('mkSave').disabled = false; $('mkSave').textContent = 'Сохранить';
+      err.textContent = e.message || 'Не удалось сохранить';
+    }
+  };
+}
+
 if ('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+const toHost = $('btnIn') && $('btnIn').parentElement;
+if (toHost && !$('btnTO')){
+  const b = document.createElement('button');
+  b.id = 'btnTO'; b.className = 'btn'; b.textContent = 'ТО и ТР';
+  b.onclick = openTO;
+  toHost.insertBefore(b, $('btnIn'));
 }
 initOnline();
 
