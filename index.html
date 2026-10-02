@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta http-equiv="Cache-Control" content="no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
@@ -315,6 +315,19 @@
     .form-grid{grid-template-columns:1fr}
     .compl{flex-direction:column; align-items:stretch}
     .gauge{margin:0 auto}
+  }
+
+  /* шапка окна не залезает под статус-бар и вырез экрана */
+  .m-head{padding-top:calc(16px + env(safe-area-inset-top, 0px));
+          padding-left:calc(18px + env(safe-area-inset-left, 0px));
+          padding-right:calc(18px + env(safe-area-inset-right, 0px));
+          flex-wrap:wrap; gap:8px}
+  .backbtn{margin-bottom:6px}
+  @media (max-width:760px){
+    .m-head{padding-top:calc(20px + env(safe-area-inset-top, 0px)); padding-bottom:12px}
+    .backbtn{padding:9px 14px!important; font-size:15px!important; margin-bottom:8px}
+    .modal{height:100dvh; max-height:100dvh}
+    .m-foot{padding-bottom:calc(12px + env(safe-area-inset-bottom, 0px))}
   }
 </style>
 </head>
