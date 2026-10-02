@@ -282,6 +282,35 @@
     .m-body{overflow:visible}
     table.tbl th{position:static}
   }
+
+  /* ---------------------------- телефоны ---------------------------------- */
+  @media (max-width: 760px){
+    .brand small{display:none}
+    .brand h1{font-size:15px; line-height:1.2}
+    .search-wrap{order:9; flex:1 1 100%; max-width:none; margin-top:6px}
+    .stats{gap:8px; padding:6px 10px; overflow-x:auto; flex-wrap:nowrap; -webkit-overflow-scrolling:touch}
+    .stats::-webkit-scrollbar,.filters::-webkit-scrollbar{display:none}
+    .stat{white-space:nowrap; font-size:12.5px}
+    .stat b{font-size:14px}
+    .filters{flex-wrap:nowrap; overflow-x:auto; margin-left:0; padding-bottom:2px}
+    .line-chip{white-space:nowrap; font-size:12.5px; padding:4px 9px}
+    .fbtn{white-space:nowrap; padding:5px 10px}
+    main{min-height:58vh}
+    .map-area{min-height:58vh}
+    .grid{grid-template-columns:1fr}
+    .card{padding:12px}
+    #modal,.modal{width:100vw!important; max-width:none!important; height:100vh; max-height:100vh;
+      border-radius:0; margin:0; top:0; left:0; right:0; bottom:0}
+    #mBody,.m-body{max-height:none; flex:1 1 auto; overflow:auto}
+    .m-head{padding:14px 16px 10px}
+    .m-foot{padding:10px 12px; flex-wrap:wrap; gap:8px}
+    .btn,.iconbtn{min-height:38px}
+    table.tbl{font-size:11.5px}
+    table.tbl th,table.tbl td{padding:6px 7px}
+    .form-grid{grid-template-columns:1fr}
+    .compl{flex-direction:column; align-items:stretch}
+    .gauge{margin:0 auto}
+  }
 </style>
 </head>
 <body>
