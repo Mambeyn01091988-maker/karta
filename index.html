@@ -329,6 +329,16 @@
     .modal{height:100dvh; max-height:100dvh}
     .m-foot{padding-bottom:calc(12px + env(safe-area-inset-bottom, 0px))}
   }
+
+  /* сворачиваемые панели: карта остаётся чистой */
+  body.clean .topbar, body.clean .stats { display:none }
+  #panelToggle{position:fixed;top:8px;right:8px;z-index:45;display:inline-flex;align-items:center;gap:6px;
+    padding:8px 13px;border-radius:12px;border:1px solid #cdd7e2;background:rgba(255,255,255,.95);
+    font:600 13px/1 inherit;color:#20303f;cursor:pointer;box-shadow:0 4px 14px rgba(10,25,45,.16)}
+  @media (max-width:760px){
+    #panelToggle{top:calc(8px + env(safe-area-inset-top, 0px));right:8px;padding:11px 15px;font-size:14px}
+    body.clean .map-toolbar{top:calc(8px + env(safe-area-inset-top, 0px));left:8px}
+  }
 </style>
 </head>
 <body>
@@ -375,7 +385,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 20 — кнопка ТО и ТР в шапке</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 21 — сворачиваемые панели</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -3476,6 +3486,24 @@ function ensureTOButton(){
   b.onclick = openTO;
   host.insertBefore(b, anchor);
 }
+/* сворачивание панелей: на телефоне карта сразу чистая */
+(function(){
+  const KEY = 'karta-panels';
+  let val = null;
+  try { val = localStorage.getItem(KEY); } catch (e) {}
+  if (val === null) val = (window.innerWidth <= 760) ? '1' : '0';
+  const b = document.createElement('button');
+  b.id = 'panelToggle';
+  const paint = () => { b.textContent = document.body.classList.contains('clean') ? '▾ Панели' : '▴ Скрыть'; };
+  b.onclick = () => {
+    const on = document.body.classList.toggle('clean');
+    try { localStorage.setItem(KEY, on ? '1' : '0'); } catch (e) {}
+    paint();
+  };
+  if (val === '1') document.body.classList.add('clean');
+  paint();
+  document.body.appendChild(b);
+})();
 ensureTOButton();
 try { new MutationObserver(ensureTOButton).observe(document.body, { childList:true, subtree:true }); } catch (e) {}
 initOnline();
