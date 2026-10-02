@@ -1834,6 +1834,32 @@ function renderAuthBar(){
     $('btnIn').onclick = openAuth;
   }
 }
+/* вход по паролю — без писем и лимитов */
+function openAuthPassword(email){
+  setCrumb([]); mTitle.textContent = 'Вход по паролю';
+  mSub.textContent = 'Пароль выдаёт администратор. Если забыли — войдите по ссылке из письма.';
+  setPips(0);
+  mBody.innerHTML = `
+    <div class="fld" style="max-width:380px"><label>E-mail</label>
+      <input id="pwEmail" type="email" value="${escAttr(email || '')}" autocomplete="username"></div>
+    <div class="fld" style="max-width:380px;margin-top:8px"><label>Пароль</label>
+      <input id="pwPass" type="password" autocomplete="current-password"></div>
+    <div class="note">Пароль можно получить у администратора схемы.</div>`;
+  mFoot.innerHTML = `<button class="btn" id="pwCancel">Отмена</button><span class="spacer"></span>
+    <button class="btn primary" id="pwGo">Войти</button>`;
+  $('pwCancel').onclick = closeModal;
+  $('pwGo').onclick = async () => {
+    const em = ($('pwEmail').value || '').trim(), pw = $('pwPass').value || '';
+    if (!em || !pw) return;
+    $('pwGo').disabled = true;
+    const r = await ONLINE.client.auth.signInWithPassword({ email: em, password: pw });
+    if (r.error){ mBody.insertAdjacentHTML('beforeend', `<div class="empty">Не удалось войти: ${esc(r.error.message)}</div>`); $('pwGo').disabled = false; return; }
+    mBody.innerHTML = '<div class="empty">Вход выполнен, загружаю карту…</div>';
+    setTimeout(() => location.reload(), 600);
+  };
+  openModal();
+  setTimeout(() => $('pwPass') && $('pwPass').focus(), 50);
+}
 function openAuth(){
   setCrumb([]); mTitle.textContent = 'Вход в систему';
   mSub.textContent = 'Введите рабочий e-mail — придёт ссылка для входа (пароль не нужен).';
@@ -1845,8 +1871,10 @@ function openAuth(){
     </div>
     <div class="note">Доступ выдаёт администратор: он назначает роль «сверка», «редактор» или «администратор».
       Без роли вы сможете только смотреть карту.</div>`;
-  mFoot.innerHTML = `<button class="btn" id="authCancel">Отмена</button><span class="spacer"></span>
+  mFoot.innerHTML = `<button class="btn" id="authCancel">Отмена</button>
+    <button class="btn" id="authPass">Войти по паролю</button><span class="spacer"></span>
     <button class="btn primary" id="authSend">Отправить ссылку</button>`;
+  $('authPass').onclick = () => openAuthPassword($('authEmail') ? $('authEmail').value.trim() : '');
   $('authCancel').onclick = closeModal;
   $('authSend').onclick = async () => {
     const email = ($('authEmail').value || '').trim();
@@ -1855,6 +1883,15 @@ function openAuth(){
     const { error } = await ONLINE.client.auth.signInWithOtp({
       email, options: { emailRedirectTo: location.href.split('#')[0] }
     });
+    if (error && /rate limit/i.test(error.message || '')){
+      mBody.innerHTML = `<div class="empty"><b>Лимит писем исчерпан.</b><br>
+        Бесплатная почта Supabase отправляет всего несколько писем в час — попробуйте позже
+        или войдите по паролю.</div>
+        <div style="margin-top:12px"><button class="btn primary" id="authByPass">Войти по паролю</button></div>`;
+      const b = $('authByPass');
+      if (b) b.onclick = () => openAuthPassword(email);
+      return;
+    }
     mBody.innerHTML = error
       ? `<div class="empty">Не удалось отправить письмо: ${esc(error.message)}</div>`
       : `<div class="empty"><b>Письмо отправлено на ${esc(email)}</b><br>
