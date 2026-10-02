@@ -375,7 +375,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 18 — ТО и ТР</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 19 — ТО и ТР</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -3389,6 +3389,20 @@ function drawTO(){
     downloadCsv(lines.join('\r\n'), 'to-tr.csv');
   };
 }
+async function openTO(){
+  if (!ONLINE.ready){ alert('Сначала войдите в карту.'); return; }
+  if (!ONLINE.maintLoaded) await loadMaint();
+  let ov = $('toOverlay');
+  if (!ov){
+    ov = document.createElement('div');
+    ov.id = 'toOverlay';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:90;background:#fff;overflow:auto;'
+      + 'padding:16px 16px calc(80px + env(safe-area-inset-bottom, 0px))';
+    document.body.appendChild(ov);
+  }
+  ov.style.display = 'block';
+  drawTO();
+}
 function openMarkForm(sid, room, kind){
   const ov = $('toOverlay'); if (!ov) return;
   const cls = classOf(sid, room), r = TO_RULES[cls] || TO_RULES.cold;
@@ -3449,13 +3463,17 @@ function openMarkForm(sid, room, kind){
 if ('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
-const toHost = $('btnIn') && $('btnIn').parentElement;
-if (toHost && !$('btnTO')){
-  const b = document.createElement('button');
-  b.id = 'btnTO'; b.className = 'btn'; b.textContent = 'ТО и ТР';
-  b.onclick = openTO;
-  toHost.insertBefore(b, $('btnIn'));
+function ensureTOButton(){
+  const host = $('btnIn') && $('btnIn').parentElement;
+  if (host && !$('btnTO')){
+    const b = document.createElement('button');
+    b.id = 'btnTO'; b.className = 'btn'; b.textContent = 'ТО и ТР';
+    b.onclick = openTO;
+    host.insertBefore(b, $('btnIn'));
+  }
 }
+ensureTOButton();
+try { new MutationObserver(ensureTOButton).observe(document.body, { childList:true, subtree:true }); } catch (e) {}
 initOnline();
 
 </script>
