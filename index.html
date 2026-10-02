@@ -375,7 +375,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 19 — ТО и ТР</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 20 — кнопка ТО и ТР в шапке</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -3464,13 +3464,17 @@ if ('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 function ensureTOButton(){
-  const host = $('btnIn') && $('btnIn').parentElement;
-  if (host && !$('btnTO')){
-    const b = document.createElement('button');
-    b.id = 'btnTO'; b.className = 'btn'; b.textContent = 'ТО и ТР';
-    b.onclick = openTO;
-    host.insertBefore(b, $('btnIn'));
-  }
+  if ($('btnTO')) return;
+  // кнопка появляется рядом с «Войти» или «Выйти» — что есть в шапке
+  const anchor = $('btnIn') || $('btnOut');
+  const host = anchor && anchor.parentElement;
+  if (!anchor || !host) return;
+  const b = document.createElement('button');
+  b.id = 'btnTO';
+  b.className = anchor.className || 'btn';
+  b.textContent = 'ТО и ТР';
+  b.onclick = openTO;
+  host.insertBefore(b, anchor);
 }
 ensureTOButton();
 try { new MutationObserver(ensureTOButton).observe(document.body, { childList:true, subtree:true }); } catch (e) {}
