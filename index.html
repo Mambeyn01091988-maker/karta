@@ -166,9 +166,13 @@
   .filter-row{display:flex; gap:10px; align-items:center; margin:0 0 13px; flex-wrap:wrap}
   .filter-row input{padding:8px 11px; border:1px solid var(--border); border-radius:9px; font:inherit; min-width:220px; outline:none}
   .filter-row input:focus{border-color:#9fb3c8}
-  table.tbl{width:100%; border-collapse:collapse; font-size:12.5px}
+  table.tbl{width:100%; border-collapse:separate; border-spacing:0; font-size:12.5px}
   table.tbl th,table.tbl td{border-bottom:1px solid #e8edf3; padding:8px 9px; text-align:left; vertical-align:top}
-  table.tbl th{background:#f6f8fb; font-size:11.5px; text-transform:uppercase; letter-spacing:.35px; color:var(--muted); position:sticky; top:0; z-index:1; white-space:nowrap}
+  table.tbl th{background:#f6f8fb; font-size:11.5px; text-transform:uppercase; letter-spacing:.35px; color:var(--muted); white-space:nowrap}
+  /* шапка таблицы остаётся на виду при прокрутке списка */
+  table.tbl thead th{position:sticky; top:0; z-index:3; background:#f2f6fa;
+    box-shadow:inset 0 -1px 0 #dbe3ec, inset 0 1px 0 #e8eef5}
+  @media (max-width:760px){ table.tbl thead th{background:#eef3f9} }
   table.tbl tbody tr:hover{background:#f9fbfd}
   table.tbl tr.mark{background:#fff6d9 !important; box-shadow:inset 3px 0 0 #e0a800}
   .inv{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-weight:700; letter-spacing:.3px}
@@ -385,7 +389,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 22 — понятный фильтр</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 23 — закреплённая шапка таблиц</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
