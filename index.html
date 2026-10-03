@@ -385,7 +385,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 21 — сворачиваемые панели</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 22 — понятный фильтр</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -601,6 +601,17 @@ function filterCount(){
   }
 }
 
+/* что сейчас отфильтровано — с учётом и линии, и категории */
+function filterSummary(){
+  const cat = (FILTERS.find(f => f.id === filterMode) || FILTERS[0]).label;
+  const parts = [];
+  if (focusLineId){
+    const l = LINES.find(x => x.id === focusLineId);
+    if (l) parts.push('линия: ' + l.name);
+  }
+  if (cat !== 'Всё') parts.push(cat.toLowerCase() + ' — ' + filterCount());
+  return parts.length ? '<b>' + parts.join(' · ') + '</b>' : '<span>фильтр не задан</span>';
+}
 let TOTALS = {rooms:0, systems:0, bad:0};
 function renderStats(){
   const scoped = focusLineId
@@ -634,8 +645,7 @@ function renderStats(){
         ${scoped.reduce((n,s) => n + ONLINE.diagrams.filter(d => d.station_id === s.id && monthsBetween(d.diagram_date) >= SCHEMA_MAX_MONTHS).length, 0)}</b>
         <span>схем старше ${SCHEMA_MAX_LABEL}</span></span>` : ''}
     ${offMap ? `<span class="stat"><b>${offMap}</b> <span>депо и объектов</span></span>` : ''}
-    <span class="stat chip-filter">${(FILTERS.find(f => f.id === filterMode) || FILTERS[0]).label !== 'Всё'
-      ? `<b>${filterCount()}</b>` : '<span>фильтр не задан</span>'}</span>
+    <span class="stat chip-filter">${filterSummary()}</span>
     <span class="spacer"></span>
     ${LINES.map(l => `<button class="line-chip ${focusLineId === l.id ? 'on' : ''}" data-line="${esc(l.id)}" title="${esc(l.termini||'')}">
         <i style="background:${esc(l.color)}"></i>${esc(l.name)}<b>${l.stationCount}</b></button>`).join('')}
