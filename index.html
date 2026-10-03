@@ -359,11 +359,8 @@
   .lv-st .ct{color:var(--muted);font-size:12.5px;white-space:nowrap}
   @media (max-width:760px){ .lv-st{padding:14px} .lv-head{padding:13px 14px} }
 
-  /* плавающая кнопка «Карта/Список» — видна всегда */
-  #viewToggle{display:none;position:fixed;left:8px;top:calc(8px + env(safe-area-inset-top, 0px));z-index:46;
-    padding:11px 16px;border-radius:12px;border:1px solid #cdd7e2;background:rgba(255,255,255,.96);
-    font:700 14px/1 inherit;color:#20303f;cursor:pointer;box-shadow:0 4px 14px rgba(10,25,45,.18)}
-  body.listmode #viewToggle{display:inline-flex;align-items:center;gap:6px}
+  /* кнопка «Список» в панели карты */
+  #viewToggle{margin-left:2px}
   #viewToggleFloat{position:fixed;right:10px;bottom:calc(70px + env(safe-area-inset-bottom, 0px));z-index:47;
     padding:13px 18px;border-radius:14px;border:1px solid #cdd7e2;background:#fff;
     font:700 15px/1 inherit;color:#20303f;cursor:pointer;box-shadow:0 8px 22px rgba(10,25,45,.22);display:none}
@@ -418,7 +415,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 34 — карта после списка</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 35 — проверенные кнопки режимов</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
