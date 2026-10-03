@@ -418,7 +418,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 32 — чистый список станций</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 33 — рабочий список станций</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -3543,6 +3543,93 @@ function ensureViewUI(){
   }
   if (viewMode === 'list') setView('list');
 }
+
+/* ---------- расширенный список станций: поиск, значки, фильтр по линиям ---------- */
+let lvQuery = '';
+let lvHide = (() => { try { return JSON.parse(localStorage.getItem('karta-lv-hide') || '[]'); } catch (e) { return []; } })();
+
+function stationMaint(st){
+  let late = 0, soon = 0;
+  (st.groups || []).forEach(g => (g.rooms || []).forEach(r => {
+    ['ТО', 'ТР'].forEach(k => {
+      const s = statusOf(st.id, r.number || '', k);
+      if (s.state === 'late') late++;
+      else if (s.state === 'soon') soon++;
+    });
+  }));
+  return { late, soon };
+}
+function stationSchemes(st){
+  const list = (ONLINE.diagrams || []).filter(d => d.station_id === st.id);
+  const old = list.filter(d => monthsBetween(d.diagram_date) >= SCHEMA_MAX_MONTHS).length;
+  return { total: list.length, old };
+}
+function lvBadges(st){
+  const c = stationCounts(st), m = stationMaint(st), d = stationSchemes(st);
+  const fire = (typeof stationFire === 'function') ? stationFire(st) : 0;
+  const bad = c.bad;
+  const chip = (txt, color, bg) => `<span style="padding:2px 7px;border-radius:8px;font-size:11px;font-weight:600;background:${bg};color:${color};white-space:nowrap">${txt}</span>`;
+  let out = '';
+  if (d.total) out += chip('схем ' + d.total + (d.old ? ' · просрочено ' + d.old : ''), d.old ? '#b3261e' : '#41505f', d.old ? '#fde8e6' : '#eef2f6');
+  if (m.late) out += chip('ТО/ТР просрочено ' + m.late, '#b3261e', '#fde8e6');
+  else if (m.soon) out += chip('ТО/ТР на неделе ' + m.soon, '#9a6b00', '#fff4d6');
+  if (fire) out += chip('пожаротушение ' + fire, '#b3261e', '#fde8e6');
+  if (bad) out += chip('неисправно ' + bad, '#b3261e', '#fde8e6');
+  return out;
+}
+renderList = function(){
+  const box = $('listView'); if (!box) return;
+  const q = lvQuery.trim().toLowerCase();
+  const lineBlock = (l) => {
+    const all = STATIONS.filter(s => s.lineId === l.id && (s.groups || []).length);
+    if (!all.length) return '';
+    const hidden = lvHide.indexOf(l.id) >= 0;
+    const sts = all.filter(s => !q || s.name.toLowerCase().includes(q));
+    const lateSum = all.reduce((n, s) => n + stationMaint(s).late, 0);
+    if (q && !sts.length) return '';
+    return `<div class="lv-line"><div class="lv-head" data-lv="${escAttr(l.id)}" style="cursor:pointer">
+        <span style="width:14px;color:#8b98a8">${hidden && !q ? '▸' : '▾'}</span>
+        <i style="background:${esc(l.color)}"></i>${esc(l.name)}
+        <b>${all.length} станций${lateSum ? ' · просрочено ' + lateSum : ''}</b></div>
+      ${(hidden && !q) ? '' : sts.map(s => { const c = stationCounts(s);
+        return `<button class="lv-st" data-st="${escAttr(s.id)}">
+          <span class="nm">${esc(s.name)}<div style="color:var(--muted);font-size:12px;margin-top:3px">${c.rooms} пом. · ${c.units} ед.</div></span>
+          <span class="ct" style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;max-width:60%">${lvBadges(s)}</span>
+        </button>`; }).join('')}</div>`;
+  };
+  const depots = STATIONS.filter(s => s.offMap && (s.groups || []).length && (!q || s.name.toLowerCase().includes(q)));
+  const top = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+      <button class="btn primary" id="toMapBtn" style="padding:10px 16px">☰ Карта</button>
+      <b style="font-size:16px">Станции по линиям</b>
+      <input id="lvSearch" type="search" value="${escAttr(lvQuery)}" placeholder="Поиск станции…"
+        style="flex:1;min-width:170px;padding:10px 12px;border:1px solid #cdd7e2;border-radius:10px;font-size:14px">
+      <button class="btn" id="lvAll">Развернуть все</button>
+    </div>`;
+  const body = LINES.map(lineBlock).join('') + (depots.length ? `<div class="lv-line">
+      <div class="lv-head"><span style="width:14px"></span><i style="background:#8b98a8"></i>Депо, АБК и объекты<b>${depots.length}</b></div>
+      ${depots.map(s => { const c = stationCounts(s);
+        return `<button class="lv-st" data-st="${escAttr(s.id)}"><span class="nm">${esc(s.name)}
+          <div style="color:var(--muted);font-size:12px;margin-top:3px">${c.rooms} пом. · ${c.units} ед.</div></span>
+          <span class="ct">${lvBadges(s)}</span></button>`; }).join('')}</div>` : '');
+  const verEl = $('verTag');
+  const verTxt = verEl ? verEl.textContent.trim() : '';
+  box.innerHTML = top + (body || '<div class="empty">Ничего не найдено</div>')
+    + (verTxt ? `<div style="text-align:center;color:#9aa6b2;font-size:11.5px;padding:16px 0 6px">${esc(verTxt)}</div>` : '');
+  $('toMapBtn').onclick = () => setView('map');
+  const inp = $('lvSearch');
+  inp.oninput = (e) => { lvQuery = e.target.value; const p = e.target.selectionStart; renderList(); const n = $('lvSearch'); if (n){ n.focus(); n.setSelectionRange(p, p); } };
+  $('lvAll').onclick = () => { lvHide = []; try { localStorage.setItem('karta-lv-hide', '[]'); } catch (e) {} renderList(); };
+  box.querySelectorAll('[data-lv]').forEach(h => h.onclick = () => {
+    const id = h.dataset.lv;
+    lvHide = lvHide.indexOf(id) >= 0 ? lvHide.filter(x => x !== id) : lvHide.concat([id]);
+    try { localStorage.setItem('karta-lv-hide', JSON.stringify(lvHide)); } catch (e) {}
+    renderList();
+  });
+  box.querySelectorAll('[data-st]').forEach(b => b.onclick = () => {
+    const st = STATIONS.find(s => s.id === b.dataset.st);
+    if (st) gotoStation(st, { forceCard:true });
+  });
+};
 
 async function openTO(){
   if (!ONLINE.ready){ alert('Сначала войдите в карту.'); return; }
