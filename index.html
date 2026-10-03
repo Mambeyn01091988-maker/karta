@@ -343,6 +343,21 @@
     #panelToggle{top:calc(8px + env(safe-area-inset-top, 0px));right:8px;padding:11px 15px;font-size:14px}
     body.clean .map-toolbar{top:calc(8px + env(safe-area-inset-top, 0px));left:8px}
   }
+
+  /* режим списка станций вместо схемы */
+  body.listmode .map-area{display:none}
+  #listView{display:none;padding:12px 14px calc(90px + env(safe-area-inset-bottom, 0px));max-width:1100px;margin:0 auto}
+  body.listmode #listView{display:block}
+  .lv-line{border:1px solid var(--border);border-radius:14px;margin-bottom:12px;background:#fff;overflow:hidden}
+  .lv-head{display:flex;align-items:center;gap:9px;padding:12px 14px;font-weight:700;font-size:15px;background:#f7fafd}
+  .lv-head i{width:12px;height:12px;border-radius:50%;display:inline-block}
+  .lv-head b{margin-left:auto;color:var(--muted);font-weight:600;font-size:13px}
+  .lv-st{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:12px 14px;border:0;
+    border-top:1px solid #eef2f7;background:#fff;font-size:14.5px;cursor:pointer;color:inherit}
+  .lv-st:hover{background:#f5f9fd}
+  .lv-st .nm{flex:1}
+  .lv-st .ct{color:var(--muted);font-size:12.5px;white-space:nowrap}
+  @media (max-width:760px){ .lv-st{padding:14px} .lv-head{padding:13px 14px} }
 </style>
 </head>
 <body>
@@ -389,7 +404,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 27 — НБ в технических помещениях</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 28 — режим списка станций</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -3436,6 +3451,66 @@ function drawTO(){
     downloadCsv(lines.join('\r\n'), 'to-tr.csv');
   };
 }
+/* ---------- режим списка станций по линиям ---------- */
+let viewMode = (() => { try { return localStorage.getItem('karta-view') || 'map'; } catch (e) { return 'map'; } })();
+function stationCounts(st){
+  let rooms = 0, units = 0, bad = 0;
+  (st.groups || []).forEach(g => (g.rooms || []).forEach(r => {
+    rooms++; units += (r.systems || []).length;
+    (r.systems || []).forEach(x => { if (String(x.state || '').toLowerCase().indexOf('неисправ') === 0) bad++; });
+  }));
+  return { rooms, units, bad };
+}
+function renderList(){
+  const box = $('listView'); if (!box) return;
+  const line = (l) => {
+    const sts = STATIONS.filter(s => s.lineId === l.id && (s.groups || []).length);
+    if (!sts.length) return '';
+    return `<div class="lv-line"><div class="lv-head"><i style="background:${esc(l.color)}"></i>${esc(l.name)}
+        <b>${sts.length} станций</b></div>
+      ${sts.map(s => { const c = stationCounts(s);
+        return `<button class="lv-st" data-st="${escAttr(s.id)}"><span class="nm">${esc(s.name)}</span>
+          <span class="ct">${c.rooms} пом. · ${c.units} ед.${c.bad ? ' · <b style="color:var(--bad)">' + c.bad + ' неиспр.</b>' : ''}</span></button>`; }).join('')}</div>`;
+  };
+  const depots = STATIONS.filter(s => s.offMap && (s.groups || []).length);
+  box.innerHTML = LINES.map(line).join('') + (depots.length ? `<div class="lv-line">
+      <div class="lv-head"><i style="background:#8b98a8"></i>Депо, АБК и объекты<b>${depots.length}</b></div>
+      ${depots.map(s => { const c = stationCounts(s);
+        return `<button class="lv-st" data-st="${escAttr(s.id)}"><span class="nm">${esc(s.name)}</span>
+          <span class="ct">${c.rooms} пом. · ${c.units} ед.</span></button>`; }).join('')}</div>` : '');
+  box.querySelectorAll('[data-st]').forEach(b => b.onclick = () => {
+    const st = STATIONS.find(s => s.id === b.dataset.st);
+    if (st) gotoStation(st, { forceCard:true });
+  });
+}
+function setView(mode){
+  viewMode = mode;
+  try { localStorage.setItem('karta-view', mode); } catch (e) {}
+  document.body.classList.toggle('listmode', mode === 'list');
+  const b = $('viewToggle');
+  if (b) b.textContent = mode === 'list' ? '☰ Карта' : '☰ Список';
+  if (mode === 'list') renderList();
+}
+function ensureViewUI(){
+  if (!$('listView')){
+    const v = document.createElement('div'); v.id = 'listView';
+    const host = $('mapArea') ? $('mapArea').parentElement : document.body;
+    host.insertBefore(v, $('mapArea'));
+  }
+  if (!$('viewToggle')){
+    const tb = document.querySelector('.map-toolbar');
+    if (tb){
+      const b = document.createElement('button');
+      b.id = 'viewToggle'; b.className = 'zbtn';
+      b.textContent = viewMode === 'list' ? '☰ Карта' : '☰ Список';
+      b.title = 'Показать станции списком по линиям';
+      b.onclick = () => setView(viewMode === 'list' ? 'map' : 'list');
+      tb.appendChild(b);
+    }
+  }
+  if (viewMode === 'list') setView('list');
+}
+
 async function openTO(){
   if (!ONLINE.ready){ alert('Сначала войдите в карту.'); return; }
   if (!ONLINE.maintLoaded) await loadMaint();
@@ -3542,6 +3617,7 @@ function ensureTOButton(){
   document.body.appendChild(b);
 })();
 ensureTOButton();
+ensureViewUI();
 try { new MutationObserver(ensureTOButton).observe(document.body, { childList:true, subtree:true }); } catch (e) {}
 initOnline();
 
