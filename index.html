@@ -389,7 +389,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 23 — закреплённая шапка таблиц</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 24 — автовосстановление связи</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -1720,6 +1720,7 @@ async function bootSession(){
     ONLINE.ready = true; ONLINE.offline = true;
     applyRows(ONLINE.rows);
     refreshAll(); renderAuthBar(); buildWatermark();
+    startOfflineRetry();               // сами проверяем связь каждые 20 секунд
   }
 }
 async function loadProfile(){
@@ -1900,7 +1901,8 @@ function renderAuthBar(){
         : '<span class="dot-live" title="живое обновление включено"></span>')
     : '<span class="dot-live dot-off" title="офлайн-режим: данные вшиты в файл"></span>';
   const offNote = ONLINE.offline
-    ? `<span class="who" style="color:#c98a00">офлайн — из памяти${(() => { const c = loadCache(); return c && c.at ? ', ' + new Date(c.at).toLocaleString('ru-RU') : ''; })()}</span>`
+    ? `<span class="who" style="color:#c98a00">офлайн — из памяти${(() => { const c = loadCache(); return c && c.at ? ', ' + new Date(c.at).toLocaleString('ru-RU') : ''; })()}
+        <button class="btn" style="margin-left:8px;padding:4px 10px;font-size:12px" onclick="retryOnline()">Обновить</button></span>`
     : '';
   if (!ONLINE.enabled){
     bar.innerHTML = live + '<span class="who">офлайн-версия · данные в файле</span>';
@@ -2427,6 +2429,27 @@ async function flushQueue(){
   }
 }
 window.addEventListener('online', () => { ONLINE.offline = false; flushQueue(); });
+
+/* если связь пропала, пробуем восстановить её сами */
+let offlineTimer = null;
+async function retryOnline(){
+  if (!ONLINE.user) return false;
+  try {
+    await loadProfile();
+    if (!accessAllowed()) return false;
+    await reloadAll();
+    ONLINE.ready = true; ONLINE.offline = false;
+    applyRows(ONLINE.rows); refreshAll(); renderAuthBar();
+    saveCache(); flushQueue(); loadMaint();
+    if (offlineTimer){ clearInterval(offlineTimer); offlineTimer = null; }
+    return true;
+  } catch (e) { return false; }
+}
+window.retryOnline = retryOnline;
+function startOfflineRetry(){
+  if (offlineTimer) return;
+  offlineTimer = setInterval(() => { retryOnline(); }, 20000);
+}
 
 async function logAccess(action){
   if (!ONLINE.ready || !ONLINE.user) return;
