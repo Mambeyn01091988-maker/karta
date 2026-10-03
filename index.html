@@ -418,7 +418,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 33 — рабочий список станций</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 34 — карта после списка</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -3513,6 +3513,7 @@ function renderList(){
 }
 function setView(mode){
   viewMode = mode;
+  if (mode === 'map') setTimeout(() => { try { setFocus(null); fitAll(); } catch (e) {} }, 30);
   try { localStorage.setItem('karta-view', mode); } catch (e) {}
   document.body.classList.toggle('listmode', mode === 'list');
   const b = $('viewToggle');
