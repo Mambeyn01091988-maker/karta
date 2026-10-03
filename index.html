@@ -369,6 +369,9 @@
     font:700 15px/1 inherit;color:#20303f;cursor:pointer;box-shadow:0 8px 22px rgba(10,25,45,.22);display:none}
   body.listmode #viewToggleFloat{display:inline-block}
   body.listmode #listView{padding-top:12px}
+
+  /* в режиме списка подвал не перекрывает строки станций */
+  body.listmode footer{display:none}
 </style>
 </head>
 <body>
@@ -415,7 +418,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 31 — кнопка возврата на виду</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 32 — чистый список станций</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -3492,11 +3495,15 @@ function renderList(){
   const top = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
       <button class="btn primary" id="toMapBtn" style="padding:10px 16px">☰ Карта</button>
       <b style="font-size:16px">Станции по линиям</b></div>`;
+  const verEl = $('verTag');
+  const verTxt = verEl ? verEl.textContent.trim() : '';
   box.innerHTML = top + LINES.map(line).join('') + (depots.length ? `<div class="lv-line">
       <div class="lv-head"><i style="background:#8b98a8"></i>Депо, АБК и объекты<b>${depots.length}</b></div>
       ${depots.map(s => { const c = stationCounts(s);
         return `<button class="lv-st" data-st="${escAttr(s.id)}"><span class="nm">${esc(s.name)}</span>
           <span class="ct">${c.rooms} пом. · ${c.units} ед.</span></button>`; }).join('')}</div>` : '');
+  if (verTxt) box.insertAdjacentHTML('beforeend',
+    `<div style="text-align:center;color:#9aa6b2;font-size:11.5px;padding:16px 0 6px">${esc(verTxt)}</div>`);
   const mb = $('toMapBtn');
   if (mb) mb.onclick = () => setView('map');
   box.querySelectorAll('[data-st]').forEach(b => b.onclick = () => {
