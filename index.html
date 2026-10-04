@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 39 — памятка в карте</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 40 — надёжный вход по паролю</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -2051,9 +2051,32 @@ function openAuthPassword(email){
   $('pwGo').onclick = async () => {
     const em = ($('pwEmail').value || '').trim(), pw = $('pwPass').value || '';
     if (!em || !pw) return;
-    $('pwGo').disabled = true;
-    const r = await ONLINE.client.auth.signInWithPassword({ email: em, password: pw });
-    if (r.error){ mBody.insertAdjacentHTML('beforeend', `<div class="empty">Не удалось войти: ${esc(r.error.message)}</div>`); $('pwGo').disabled = false; return; }
+    const btn = $('pwGo'); btn.disabled = true;
+    const old = $('pwErr'); if (old) old.remove();
+    let r = null, lastMsg = '';
+    for (let i = 0; i < 3; i++){
+      try {
+        r = await ONLINE.client.auth.signInWithPassword({ email: em, password: pw });
+        if (!r.error) break;
+        lastMsg = String(r.error.message || '');
+        if (!/load failed|failed to fetch|network|timeout/i.test(lastMsg)) break;
+      } catch (e) { lastMsg = e.message || String(e); }
+      if (i < 2){
+        mBody.insertAdjacentHTML('beforeend', `<div class="empty" id="pwWait">Связь прервалась, пробуем ещё раз… (попытка ${i + 2} из 3)</div>`);
+        const w = $('pwWait');
+        await new Promise(res => setTimeout(res, 1600));
+        if (w) w.remove();
+      }
+    }
+    if (!r || r.error){
+      const msg = (r && r.error) ? String(r.error.message || '') : lastMsg;
+      const isNet = /load failed|failed to fetch|network|timeout|connection/i.test(msg);
+      mBody.insertAdjacentHTML('beforeend', `<div class="empty" id="pwErr">` + (isNet
+        ? `Нет связи с сервером — запрос не дошёл. Проверьте интернет и нажмите «Войти» ещё раз.<br>
+           <span style="color:#8b98a8;font-size:12px">Если не помогает: переключитесь на другой интернет (мобильный или Wi-Fi), отключите VPN, подождите минуту.</span>`
+        : `Не удалось войти: ${esc(msg)}`) + `</div>`);
+      btn.disabled = false; return;
+    }
     mBody.innerHTML = '<div class="empty">Вход выполнен, загружаю карту…</div>';
     setTimeout(() => location.reload(), 600);
   };
