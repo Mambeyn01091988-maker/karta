@@ -415,7 +415,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 35 — проверенные кнопки режимов</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 36 — надёжное подключение</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -1740,7 +1740,12 @@ async function bootSession(){
   } catch (e) {
     // нет связи — работаем по сохранённым данным
     const c = loadCache();
-    if (!c || !c.rows || !c.rows.length){ ONLINE.error = e.message || String(e); renderAuthBar(); return; }
+    if (!c || !c.rows || !c.rows.length){
+      ONLINE.error = e.message || String(e);
+      renderAuthBar();
+      startOfflineRetry();               // данных нет — пробуем подключиться снова сами
+      return;
+    }
     ONLINE.rows = c.rows; ONLINE.assemblies = c.assemblies || []; ONLINE.diagrams = c.diagrams || [];
     ONLINE.profile = ONLINE.profile || c.profile || { email: ONLINE.user && ONLINE.user.email, role: 'viewer', active: true };
     ONLINE.ready = true; ONLINE.offline = true;
@@ -1926,6 +1931,10 @@ function renderAuthBar(){
         ? '<span class="dot-live dot-off" title="нет связи — данные из памяти телефона"></span>'
         : '<span class="dot-live" title="живое обновление включено"></span>')
     : '<span class="dot-live dot-off" title="офлайн-режим: данные вшиты в файл"></span>';
+  const errNote = (ONLINE.error && !ONLINE.ready)
+    ? `<span class="who" style="color:#b3261e">нет связи с сервером
+        <button class="btn" style="margin-left:8px;padding:4px 10px;font-size:12px" onclick="retryOnline()">Повторить</button></span>`
+    : '';
   const offNote = ONLINE.offline
     ? `<span class="who" style="color:#c98a00">офлайн — из памяти${(() => { const c = loadCache(); return c && c.at ? ', ' + new Date(c.at).toLocaleString('ru-RU') : ''; })()}
         <button class="btn" style="margin-left:8px;padding:4px 10px;font-size:12px" onclick="retryOnline()">Обновить</button></span>`
@@ -1943,7 +1952,7 @@ function renderAuthBar(){
     return;
   }
   if (ONLINE.user){
-    bar.innerHTML = live + offNote
+    bar.innerHTML = live + errNote + offNote
       + `<span class="who">${esc(ONLINE.profile && (ONLINE.profile.full_name || ONLINE.profile.email) || ONLINE.user.email || '')}</span>`
       + `<span class="role" title="${escAttr(ROLE_HINT[myRole()])}">${ROLE_TITLE[myRole()] || myRole()}</span>`
       + (canAdmin() ? '<button class="btn" id="btnAccess">Доступы и журнал</button>' : '')
