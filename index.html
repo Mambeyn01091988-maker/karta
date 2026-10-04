@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 38 — адаптация под экран</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 39 — памятка в карте</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -3541,6 +3541,84 @@ function drawTO(){
     downloadCsv(lines.join('\r\n'), 'to-tr.csv');
   };
 }
+/* ================= памятка для сотрудников ================= */
+function openHelp(){
+  let ov = $('helpOverlay');
+  if (!ov){
+    ov = document.createElement('div');
+    ov.id = 'helpOverlay';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:88;background:#fff;overflow:auto;'
+      + 'padding:16px 16px calc(80px + env(safe-area-inset-bottom, 0px))';
+    document.body.appendChild(ov);
+  }
+  const h2 = (t) => `<h3 style="margin:18px 0 6px;font-size:16px">${t}</h3>`;
+  const p = (t) => `<p style="margin:0 0 8px;font-size:14px;line-height:1.5">${t}</p>`;
+  const ul = (a) => `<ul style="margin:0 0 8px;padding-left:20px;font-size:14px;line-height:1.6">${a.map(x => '<li>' + x + '</li>').join('')}</ul>`;
+  ov.innerHTML = `<div style="max-width:780px;margin:0 auto">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+      <h2 style="margin:0;font-size:20px">Памятка: как работать с картой</h2>
+      <span style="flex:1"></span>
+      <button class="btn" id="helpPrint">Печать</button>
+      <button class="btn" id="helpClose">Закрыть</button>
+    </div>
+    <div style="color:#6b7885;font-size:13px;margin-bottom:12px">Интерактивная карта Московского метрополитена · системы кондиционирования</div>
+
+    ${h2('1. Вход')}
+    ${ul(['Ссылка: <b>mambeyn01091988-maker.github.io/karta/</b>',
+          'Нажмите <b>«Войти»</b> и введите свою почту и пароль, выданные руководителем.',
+          'Пароль можно не вводить каждый раз — карта запомнит вас на этом устройстве.',
+          'На телефон можно добавить: меню браузера → <b>«На экран Домой»</b> — будет открываться как приложение.'])}
+    ${h2('2. Как найти нужное оборудование')}
+    ${ul(['<b>Карта</b>: нажмите станцию на схеме. Колесо мыши или два пальца — увеличение, перетаскивание — сдвиг.',
+          '<b>Список</b>: кнопка «☰ Список» — все станции по линиям, с количеством помещений и оборудования.',
+          '<b>Поиск</b> (сверху): станция, линия, номер помещения, инвентарный номер.',
+          '<b>Фильтры</b>: неисправности, просроченные схемы, не проверено, пожаротушение, технические помещения.',
+          'Путь всегда один: <b>станция → раздел → помещение → оборудование</b>. Назад — кнопка «← Назад» внизу слева.'])}
+    ${h2('3. Сверка оборудования')}
+    ${ul(['Откройте помещение и найдите нужную единицу по инвентарному номеру.',
+          'Нажмите <b>«Проверено»</b> — отметка сохранится с вашим именем и временем.',
+          'Если что-то не так — нажмите <b>«Не проверено»</b> и напишите, что именно: это попадёт в журнал.',
+          'Можно приложить фото: на телефоне — сразу снять камерой.'])}
+    ${h2('4. ТО и ТР')}
+    ${ul(['Кнопка <b>«ТО и ТР»</b> в шапке — список работ: просрочено, на этой неделе, не начато.',
+          'В строке помещения нажмите <b>«Выполнено»</b>, укажите дату и примечание.',
+          'Для <b>ТР протокол обязателен</b> — фото или PDF. Без него отметка не сохранится.',
+          'Раньше срока — можно, позже — нельзя: просрочка считается в рабочих днях.'])}
+    ${h2('5. Если нет интернета')}
+    ${ul(['Карта откроется и покажет сохранённые данные — в шапке появится <b>«офлайн — из памяти»</b>.',
+          'Отметки сверки и ТО/ТР можно ставить: они сохранятся в телефоне.',
+          'Как только связь появится, карта отправит всё на сервер сама и покажет, сколько отправила.',
+          'Если связи нет долго — нажмите «Обновить» рядом с надписью.'])}
+    ${h2('6. Кто что может')}
+    ${ul(['<b>Просмотр</b> — смотреть карту, искать, выгружать CSV.',
+          '<b>Сверка</b> — плюс отмечать «проверено / не проверено», комментарии, фото, ТО и ТР.',
+          '<b>Редактор</b> — плюс править оборудование и сборки.',
+          '<b>Администратор</b> — плюс доступы сотрудников и журнал.'])}
+    ${h2('7. Важно')}
+    ${ul(['Карта содержит служебную информацию. <b>Не передавайте ссылку, пароль и скриншоты посторонним.</b>',
+          'На экране у каждого стоит отметка с его почтой и временем.',
+          'Все изменения записываются в журнал: кто, когда и что поменял.',
+          'Забыли пароль или что-то не работает — обратитесь к администратору схемы.'])}
+    <div style="margin-top:18px;padding-top:12px;border-top:1px solid #e6ecf2;color:#8b98a8;font-size:12px">
+      Данные: «АКТУАЛЬНАЯ Книга оборудования СК 28.08.2025». Схема условная: кольца окружностями, радиусы прямыми.
+    </div>
+  </div>`;
+  ov.style.display = 'block';
+  $('helpClose').onclick = () => { ov.style.display = 'none'; };
+  $('helpPrint').onclick = () => window.print();
+}
+function ensureHelpButton(){
+  if ($('btnHelp')) return;
+  const anchor = $('btnTO') || $('btnIn') || $('btnOut');
+  const host = anchor && anchor.parentElement;
+  if (!host) return;
+  const b = document.createElement('button');
+  b.id = 'btnHelp'; b.className = anchor.className || 'btn';
+  b.textContent = 'Памятка';
+  b.onclick = openHelp;
+  host.insertBefore(b, anchor);
+}
+
 /* ================= кто сейчас в карте (онлайн) ================= */
 ONLINE.online = Object.create(null);
 ONLINE.names = Object.create(null);
@@ -3884,6 +3962,7 @@ function ensureTOButton(){
   document.body.appendChild(b);
 })();
 ensureTOButton();
+ensureHelpButton();
 ensureViewUI();
 ensureOnlineChip();
 try { new MutationObserver(ensureTOButton).observe(document.body, { childList:true, subtree:true }); } catch (e) {}
