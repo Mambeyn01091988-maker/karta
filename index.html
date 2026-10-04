@@ -369,6 +369,70 @@
 
   /* в режиме списка подвал не перекрывает строки станций */
   body.listmode footer{display:none}
+
+  /* ============ адаптация под любое устройство ============ */
+
+  /* очень маленькие телефоны (до 380) */
+  @media (max-width:380px){
+    .brand h1{font-size:15px}
+    .brand p{font-size:11.5px}
+    .stats{font-size:12px;gap:8px}
+    .fbtn,.line-chip,.btn{padding:7px 10px;font-size:12.5px}
+    .lv-st{padding:12px 10px}
+    .lv-st .nm{font-size:13.5px}
+    table.tbl{font-size:11px}
+  }
+
+  /* планшеты (761–1100): промежуточный режим */
+  @media (min-width:761px) and (max-width:1100px){
+    .topbar{flex-wrap:wrap;gap:10px}
+    .search-wrap{flex:1 1 100%;order:5}
+    #regTable,#repTable{max-height:64vh}
+    .m-body{padding:16px}
+  }
+
+  /* сенсорные экраны: крупные кнопки, без «наведения» */
+  @media (hover:none), (pointer:coarse){
+    .btn,.fbtn,.line-chip,.zbtn,.iconbtn{min-height:42px}
+    .lv-st{min-height:56px}
+    .lv-head{min-height:52px}
+    .fbtn,.line-chip{padding:9px 13px}
+    .search-wrap input{padding:12px 12px 12px 34px;font-size:15px}
+    table.tbl td,table.tbl th{padding:9px 8px}
+  }
+
+  /* телефон «лёжа»: низкий экран */
+  @media (max-height:520px) and (orientation:landscape){
+    .topbar{padding-top:8px;padding-bottom:8px}
+    .brand p{display:none}
+    .map-toolbar{padding:6px 8px;gap:6px}
+    .map-toolbar .hint{display:none}
+    .modal{max-height:100dvh;height:100dvh;border-radius:14px}
+    #listView{padding-bottom:24px}
+  }
+
+  /* большие мониторы: крупнее текст и таблицы */
+  @media (min-width:1500px){
+    .stats{font-size:14.5px}
+    table.tbl{font-size:13.5px}
+    table.tbl th{font-size:12.5px}
+    .lv-st{font-size:15.5px;padding:14px 16px}
+    .lv-head{font-size:16px}
+    #listView{max-width:1300px}
+    .search-wrap input{font-size:15px}
+  }
+  @media (min-width:2000px){
+    #listView{max-width:1600px}
+    table.tbl{font-size:15px}
+  }
+
+  /* таблицы не ломают верстку на узких экранах */
+  #regTable,#repTable,.m-body .tbl-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+  /* уважаем системную настройку «меньше движения» */
+  @media (prefers-reduced-motion:reduce){
+    *{animation-duration:.001ms !important;transition-duration:.001ms !important}
+  }
 </style>
 </head>
 <body>
@@ -415,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 37 — кто сейчас в карте</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 38 — адаптация под экран</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
