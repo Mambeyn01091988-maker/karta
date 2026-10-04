@@ -415,7 +415,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 36 — надёжное подключение</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 37 — кто сейчас в карте</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -1737,6 +1737,7 @@ async function bootSession(){
     saveCache();                       // сохраняем для работы без интернета
     flushQueue();                      // и досылаем то, что накопилось
     loadMaint();                       // классы помещений, отметки ТО и ТР, календарь
+    loadNames().then(startPresence);   // имена сотрудников и «кто сейчас в карте»
   } catch (e) {
     // нет связи — работаем по сохранённым данным
     const c = loadCache();
@@ -2520,6 +2521,7 @@ async function openAccess(tab){
       <button class="tab ${accessTab === 'log' ? 'on' : ''}" data-at="log">Кто открывал</button>
       <button class="tab ${accessTab === 'people' ? 'on' : ''}" data-at="people">Сотрудники и приглашения</button>
       <button class="tab ${accessTab === 'changes' ? 'on' : ''}" data-at="changes">Изменения в карте</button>
+      <button class="tab ${accessTab === 'online' ? 'on' : ''}" data-at="online">Кто сейчас в карте</button>
     </div>
     <div id="acBody"></div>`;
   mBody.querySelectorAll('.tab').forEach(b => b.onclick = () => openAccess(b.dataset.at));
@@ -2569,6 +2571,9 @@ async function openAccess(tab){
         downloadCsv(lines.join('\r\n'), 'zhurnal-vhodov.csv');
       };
     }
+  } else if (accessTab === 'online') {
+    box.innerHTML = `<div style="max-width:640px"><div id="onlineBox"></div></div>`;
+    renderOnline();
   } else if (accessTab === 'changes') {
     const { data, error } = await ONLINE.client.from('audit_log').select('*')
       .order('at', { ascending: false }).limit(500);
@@ -3472,6 +3477,77 @@ function drawTO(){
     downloadCsv(lines.join('\r\n'), 'to-tr.csv');
   };
 }
+/* ================= кто сейчас в карте (онлайн) ================= */
+ONLINE.online = Object.create(null);
+ONLINE.names = Object.create(null);
+let presenceCh = null;
+
+function onlineCount(){ return Object.keys(ONLINE.online).length; }
+function onlineList(){
+  return Object.keys(ONLINE.online).map(k => {
+    const v = ONLINE.online[k] || {};
+    const em = String(v.email || '').toLowerCase();
+    return { id: k, email: v.email || '', name: ONLINE.names[em] || v.email || 'сотрудник', at: v.at || 0 };
+  }).sort((a, b) => a.name.localeCompare(b.name));
+}
+async function loadNames(){
+  try {
+    const { data } = await ONLINE.client.from('allowed_emails').select('email,note');
+    (data || []).forEach(x => { if (x.note) ONLINE.names[String(x.email).toLowerCase()] = x.note; });
+  } catch (e) {}
+}
+function renderOnline(){
+  const n = onlineCount();
+  const chip = $('onlineChip');
+  if (chip){
+    chip.textContent = '● в карте: ' + n;
+    chip.title = onlineList().map(u => u.name).join(', ') || 'никого';
+    chip.style.color = n ? '#1a7f4b' : '#8b98a8';
+  }
+  const box = $('onlineBox');
+  if (box){
+    const list = onlineList();
+    box.innerHTML = list.length
+      ? list.map(u => `<div style="display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid #eef2f7">
+          <span style="width:9px;height:9px;border-radius:50%;background:#1a7f4b;display:inline-block"></span>
+          <b style="font-size:13.5px">${esc(u.name)}</b>
+          <span style="color:var(--muted);font-size:12px">${esc(u.email)}</span>
+          <span style="flex:1"></span>
+          <span style="color:var(--muted);font-size:11.5px">${u.at ? new Date(u.at).toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit'}) : ''}</span>
+        </div>`).join('')
+      : '<div class="empty">Сейчас в карте никого нет</div>';
+  }
+}
+function startPresence(){
+  if (!ONLINE.client || !ONLINE.user || presenceCh) return;
+  try {
+    presenceCh = ONLINE.client.channel('online-map', { config: { presence: { key: ONLINE.user.id } } });
+    presenceCh.on('presence', { event: 'sync' }, () => {
+      const st = presenceCh.presenceState();
+      ONLINE.online = Object.create(null);
+      Object.keys(st).forEach(k => { const m = st[k] && st[k][0]; if (m) ONLINE.online[k] = m; });
+      renderOnline();
+    });
+    presenceCh.subscribe((status) => {
+      if (status === 'SUBSCRIBED'){
+        presenceCh.track({ email: ONLINE.profile ? ONLINE.profile.email : '', at: Date.now() });
+      }
+    });
+  } catch (e) {}
+}
+function ensureOnlineChip(){
+  if ($('onlineChip')) return;
+  const anchor = $('btnIn') || $('btnOut');
+  const host = anchor && anchor.parentElement;
+  if (!host) return;
+  const b = document.createElement('button');
+  b.id = 'onlineChip'; b.className = 'btn';
+  b.style.cssText = 'pointer-events:none;border:0;background:transparent;font-size:13px';
+  b.textContent = '● в карте: 0';
+  host.insertBefore(b, anchor);
+  renderOnline();
+}
+
 /* ---------- режим списка станций по линиям ---------- */
 let viewMode = (() => { try { return localStorage.getItem('karta-view') || 'map'; } catch (e) { return 'map'; } })();
 function stationCounts(st){
@@ -3745,6 +3821,7 @@ function ensureTOButton(){
 })();
 ensureTOButton();
 ensureViewUI();
+ensureOnlineChip();
 try { new MutationObserver(ensureTOButton).observe(document.body, { childList:true, subtree:true }); } catch (e) {}
 initOnline();
 
