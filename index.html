@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 58 — заявки</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 59 — статусы и удаление заявок</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -3777,12 +3777,50 @@ function drawRequests(){
           + '<div style="margin-top:4px;font-size:12.5px;color:var(--muted)">сообщил: ' + esc(x.source || '—')
           + ' · внёс: ' + esc((ONLINE.names && ONLINE.names[String(x.created_email || '').toLowerCase()]) || x.created_email || '—') + '</div>'
           + (x.photo_path ? '<div style="margin-top:6px"><a href="#" class="rq-photo" data-p="' + escAttr(x.photo_path) + '">📷 фото</a></div>' : '')
+          + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">'
+          + (x.status === 'новая' ? '<button class="btn rq-st" data-id="' + escAttr(x.id) + '" data-to="принята" style="padding:8px 14px">Принять</button>' : '')
+          + (x.status !== 'в работе' && x.status !== 'выполнена' && x.status !== 'закрыта' ? '<button class="btn primary rq-st" data-id="' + escAttr(x.id) + '" data-to="в работе" style="padding:8px 14px">В работу</button>' : '')
+          + (x.status !== 'выполнена' && x.status !== 'закрыта' ? '<button class="btn rq-st" data-id="' + escAttr(x.id) + '" data-to="выполнена" style="padding:8px 14px;color:#1a7f4b">Выполнена</button>' : '')
+          + (x.status === 'выполнена' ? '<button class="btn primary rq-st" data-id="' + escAttr(x.id) + '" data-to="закрыта" style="padding:8px 14px">Закрыть заявку</button>' : '')
+          + (canEditNow() ? '<button class="btn rq-del" data-id="' + escAttr(x.id) + '" style="padding:8px 14px;color:#b3261e">Удалить</button>' : '')
+          + '</div>'
           + '</div>'; }).join('') : '<div class="empty">Заявок нет</div>')
     + '</div>';
   $('rqClose').onclick = () => { ov.style.display = 'none'; };
   const add = $('rqAdd'); if (add) add.onclick = () => openNewRequest();
   $('rqSearch').oninput = (e) => { rqQuery = e.target.value; const p = e.target.selectionStart; drawRequests(); const n = $('rqSearch'); if (n){ n.focus(); n.setSelectionRange(p, p); } };
   ov.querySelectorAll('[data-rf]').forEach(b => b.onclick = () => { rqFilter = b.dataset.rf; drawRequests(); });
+  ov.querySelectorAll('.rq-st').forEach(b => b.onclick = async () => {
+    if (!canRequestNow()){ alert('Менять статус заявки может сотрудник с правом вносить заявки.'); return; }
+    b.disabled = true; b.textContent = 'Сохраняем…';
+    const to = b.dataset.to;
+    const upd = { status: to, updated_at: new Date().toISOString() };
+    if (to === 'в работе') upd.started_at = new Date().toISOString();
+    if (to === 'выполнена') upd.done_at = new Date().toISOString();
+    if (to === 'закрыта') upd.closed_at = new Date().toISOString();
+    if (to === 'в работе' || to === 'принята'){
+      upd.assigned_email = ONLINE.profile ? ONLINE.profile.email : '';
+      upd.assigned_to = ONLINE.user && ONLINE.user.id;
+    }
+    const { error } = await ONLINE.client.from('requests').update(upd).eq('id', b.dataset.id);
+    if (error){ b.disabled = false; b.textContent = 'Ошибка'; alert('Не удалось: ' + error.message); return; }
+    await loadRequests();
+    drawRequests();
+  });
+  ov.querySelectorAll('.rq-del').forEach(b => b.onclick = async () => {
+    if (!canEditNow()){ alert('Удалять заявки может администратор или редактор.'); return; }
+    if (b.dataset.arm !== '1'){
+      b.dataset.arm = '1'; b.textContent = 'Точно удалить?';
+      b.style.background = '#b3261e'; b.style.color = '#fff';
+      setTimeout(() => { if (b.dataset.arm === '1'){ b.dataset.arm = '0'; b.textContent = 'Удалить'; b.style.background = ''; b.style.color = ''; } }, 6000);
+      return;
+    }
+    b.disabled = true; b.textContent = 'Удаляем…';
+    const { error } = await ONLINE.client.from('requests').delete().eq('id', b.dataset.id);
+    if (error){ b.disabled = false; b.textContent = 'Удалить'; b.dataset.arm = '0'; b.style.background = ''; b.style.color = ''; alert('Не удалось: ' + error.message); return; }
+    await loadRequests();
+    drawRequests();
+  });
   ov.querySelectorAll('.rq-photo').forEach(a => a.onclick = async (e) => {
     e.preventDefault();
     const { data } = ONLINE.client.storage.from('equipment-photos').getPublicUrl(a.dataset.p);
