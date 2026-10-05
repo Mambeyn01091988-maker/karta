@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 60 — подпись кнопки списка</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 62 — разрешение на заявки</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -2715,6 +2715,7 @@ async function openAccess(tab){
         downloadCsv(lines.join('\r\n'), 'zhurnal-vhodov.csv');
       };
     }
+    setTimeout(() => { try { bindRequestFlag(box); } catch (e) {} }, 0);
   } else if (accessTab === 'online') {
     box.innerHTML = `<div style="max-width:640px"><div id="onlineBox"></div></div>`;
     renderOnline();
@@ -3621,6 +3622,31 @@ function drawTO(){
     downloadCsv(lines.join('\r\n'), 'to-tr.csv');
   };
 }
+/* галочка «может вносить заявки» в списке сотрудников */
+function bindRequestFlag(root){
+  (root || document).querySelectorAll('[data-act]').forEach(btn => {
+    const id = btn.dataset.act;
+    const td = btn.closest('td');
+    if (!td || td.querySelector('.rq-flag')) return;
+    const label = document.createElement('label');
+    label.className = 'rq-flag';
+    label.style.cssText = 'display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#4a5866;margin-right:8px;white-space:nowrap';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!(ONLINE.canReqMap && ONLINE.canReqMap[id]);
+    cb.title = 'Разрешить вносить заявки';
+    cb.onchange = async () => {
+      cb.disabled = true;
+      const { error } = await ONLINE.client.from('profiles').update({ can_request: cb.checked }).eq('id', id);
+      cb.disabled = false;
+      if (error){ cb.checked = !cb.checked; alert('Не удалось: ' + error.message); return; }
+      try { ONLINE.canReqMap[id] = cb.checked; } catch (e) {}
+    };
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode('заявки'));
+    td.insertBefore(label, td.firstChild);
+  });
+}
 /* ================= заявки: внеплановый ремонт ================= */
 ONLINE.requests = [];
 ONLINE.canRequest = false;
@@ -3756,6 +3782,20 @@ function drawRequests(){
     + '<span style="flex:1"></span>'
     + (canRequestNow() ? '<button class="btn primary" id="rqAdd">＋ Заявка</button>' : '')
     + '<button class="btn" id="rqClose">Закрыть</button></div>'
+    + (function(){
+        const now = new Date(), mStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const per = all.filter(x => new Date(x.created_at) >= mStart);
+        const byCat = {};
+        per.forEach(x => { const c = (RQ_CATS.find(k => k[0] === x.category) || ['', x.category])[1]; byCat[c] = (byCat[c] || 0) + 1; });
+        const closed = per.filter(x => x.done_at && x.created_at);
+        const avgMin = closed.length ? Math.round(closed.reduce((n, x) => n + (new Date(x.done_at) - new Date(x.created_at)) / 60000, 0) / closed.length) : 0;
+        const avgTxt = avgMin ? (avgMin >= 60 ? Math.round(avgMin / 60) + ' ч ' + (avgMin % 60) + ' мин' : avgMin + ' мин') : '—';
+        return '<div style="border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin-bottom:10px;font-size:13px">'
+          + '<b>За текущий месяц:</b> заявок ' + per.length + ' · выполнено ' + per.filter(x => x.status === 'выполнена' || x.status === 'закрыта').length
+          + ' · среднее время выполнения: ' + avgTxt
+          + '<div style="margin-top:5px;color:#5b6875">' + Object.keys(byCat).map(k => esc(k) + ' — ' + byCat[k]).join(' · ') + '</div>'
+          + '<div style="margin-top:6px"><button class="btn" id="rqCsv" style="padding:5px 11px;font-size:12.5px">Экспорт заявок в CSV</button></div></div>';
+      })()
     + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
     + '<input id="rqSearch" type="search" value="' + escAttr(rqQuery) + '" placeholder="Поиск: станция, помещение, описание…" style="flex:1;min-width:200px;padding:10px 12px;border:1px solid #cdd7e2;border-radius:10px;font-size:14px">'
     + ['active|Активные','new|Новые','work|В работе','done|Выполненные','all|Все'].map(s => {
@@ -3777,6 +3817,20 @@ function drawRequests(){
           + '<div style="margin-top:4px;font-size:12.5px;color:var(--muted)">сообщил: ' + esc(x.source || '—')
           + ' · внёс: ' + esc((ONLINE.names && ONLINE.names[String(x.created_email || '').toLowerCase()]) || x.created_email || '—') + '</div>'
           + (x.photo_path ? '<div style="margin-top:6px"><a href="#" class="rq-photo" data-p="' + escAttr(x.photo_path) + '">📷 фото</a></div>' : '')
+          + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">'
+          + '<select class="rq-assign" data-id="' + escAttr(x.id) + '" style="padding:7px 9px;border:1px solid #d7dfe8;border-radius:8px;font-size:13px">'
+          + '<option value="">исполнитель не назначен</option>'
+          + Object.keys(ONLINE.names || {}).map(em => '<option value="' + escAttr(em) + '"' + (String(x.assigned_email || '').toLowerCase() === em ? ' selected' : '') + '>' + esc(ONLINE.names[em]) + '</option>').join('')
+          + '</select>'
+          + '<button class="btn rq-photo-after" data-id="' + escAttr(x.id) + '" style="padding:7px 12px;font-size:12.5px">' + (x.photo_after ? '📷 заменить фото после' : '📷 фото после') + '</button>'
+          + (x.photo_after ? '<a href="#" class="rq-photo" data-p="' + escAttr(x.photo_after) + '" style="font-size:12.5px">открыть фото после</a>' : '')
+          + '</div>'
+          + '<div style="margin-top:8px;font-size:13px;color:#41505f"><b>Комментарии:</b> '
+          + ((x.comments || []).length ? (x.comments || []).map(c => '<div style="margin-top:4px">— ' + esc(c.text) + ' <span style="color:var(--muted);font-size:11.5px">(' + esc(c.who || '') + ', ' + esc(String(c.at || '').slice(0, 16).replace('T', ' ')) + ')</span></div>').join('') : '<span style="color:var(--muted)">пока нет</span>')
+          + '</div>'
+          + '<div style="display:flex;gap:8px;margin-top:6px">'
+          + '<input class="rq-comment" data-id="' + escAttr(x.id) + '" placeholder="написать комментарий…" style="flex:1;padding:9px 11px;border:1px solid #d7dfe8;border-radius:8px;font-size:13.5px">'
+          + '<button class="btn rq-comment-add" data-id="' + escAttr(x.id) + '" style="padding:9px 14px">Добавить</button></div>'
           + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">'
           + (x.status === 'новая' ? '<button class="btn rq-st" data-id="' + escAttr(x.id) + '" data-to="принята" style="padding:8px 14px">Принять</button>' : '')
           + (x.status !== 'в работе' && x.status !== 'выполнена' && x.status !== 'закрыта' ? '<button class="btn primary rq-st" data-id="' + escAttr(x.id) + '" data-to="в работе" style="padding:8px 14px">В работу</button>' : '')
@@ -3790,6 +3844,49 @@ function drawRequests(){
   const add = $('rqAdd'); if (add) add.onclick = () => openNewRequest();
   $('rqSearch').oninput = (e) => { rqQuery = e.target.value; const p = e.target.selectionStart; drawRequests(); const n = $('rqSearch'); if (n){ n.focus(); n.setSelectionRange(p, p); } };
   ov.querySelectorAll('[data-rf]').forEach(b => b.onclick = () => { rqFilter = b.dataset.rf; drawRequests(); });
+  ov.querySelectorAll('.rq-assign').forEach(sel => sel.onchange = async () => {
+    const { error } = await ONLINE.client.from('requests').update({ assigned_email: sel.value, updated_at: new Date().toISOString() }).eq('id', sel.dataset.id);
+    if (error){ alert('Не удалось: ' + error.message); return; }
+    await loadRequests(); drawRequests();
+  });
+  ov.querySelectorAll('.rq-comment-add').forEach(b => b.onclick = async () => {
+    const inp = ov.querySelector('.rq-comment[data-id="' + b.dataset.id + '"]');
+    const text = (inp && inp.value || '').trim();
+    if (!text) return;
+    const cur = (ONLINE.requests.find(x => x.id === b.dataset.id) || {}).comments || [];
+    const next = cur.concat([{ text, who: (ONLINE.profile && ONLINE.profile.email) || '', at: new Date().toISOString().slice(0, 16) }]);
+    b.disabled = true; b.textContent = '…';
+    const { error } = await ONLINE.client.from('requests').update({ comments: next }).eq('id', b.dataset.id);
+    if (error){ b.disabled = false; b.textContent = 'Добавить'; alert('Не удалось: ' + error.message); return; }
+    await loadRequests(); drawRequests();
+  });
+  ov.querySelectorAll('.rq-photo-after').forEach(b => b.onclick = () => {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*'; inp.capture = 'environment';
+    inp.onchange = async () => {
+      const f = (inp.files || [])[0]; if (!f) return;
+      const ext = (f.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = 'requests/after-' + Date.now() + '.' + ext;
+      const up = await ONLINE.client.storage.from('equipment-photos').upload(path, f, { upsert: false });
+      if (up.error){ alert('Не удалось загрузить фото: ' + up.error.message); return; }
+      const { error } = await ONLINE.client.from('requests').update({ photo_after: path }).eq('id', b.dataset.id);
+      if (error){ alert('Не удалось сохранить: ' + error.message); return; }
+      await loadRequests(); drawRequests();
+    };
+    inp.click();
+  });
+  const csv = $('rqCsv');
+  if (csv) csv.onclick = () => {
+    const head = ['Дата','Категория','Статус','Станция','Помещение','Место','Описание','Сообщил','Внёс','Исполнитель','Выполнена'];
+    const lines = [head.join(';')].concat(all.map(x => [
+      new Date(x.created_at).toLocaleString('ru-RU'),
+      (RQ_CATS.find(c => c[0] === x.category) || ['', x.category])[1],
+      RQ_STATUS[x.status] || x.status, stationNameOf(x.station_id), x.room_number || '', x.place || '',
+      x.description || '', x.source || '', x.created_email || '', x.assigned_email || '',
+      x.done_at ? new Date(x.done_at).toLocaleString('ru-RU') : ''
+    ].map(v => '"' + String(v).replace(/"/g, '""') + '"').join(';')));
+    downloadCsv(lines.join('\r\n'), 'zayavki.csv');
+  };
   ov.querySelectorAll('.rq-st').forEach(b => b.onclick = async () => {
     if (!canRequestNow()){ alert('Менять статус заявки может сотрудник с правом вносить заявки.'); return; }
     b.disabled = true; b.textContent = 'Сохраняем…';
@@ -4799,6 +4896,7 @@ function ensureHelpButton(){
 /* ================= кто сейчас в карте (онлайн) ================= */
 ONLINE.online = Object.create(null);
 ONLINE.names = Object.create(null);
+ONLINE.canReqMap = Object.create(null);
 let presenceCh = null;
 
 function onlineCount(){ return Object.keys(ONLINE.online).length; }
@@ -4813,13 +4911,14 @@ async function loadNames(){
   try {
     const [ae, pr] = await Promise.all([
       ONLINE.client.from('allowed_emails').select('email,note'),
-      ONLINE.client.from('profiles').select('id,email')
+      ONLINE.client.from('profiles').select('id,email,can_request')
     ]);
     (ae.data || []).forEach(x => { if (x.note) ONLINE.names[String(x.email).toLowerCase()] = x.note; });
     ONLINE.users = {};
     (pr.data || []).forEach(x => {
       const em = String(x.email || '').toLowerCase();
       ONLINE.users[x.id] = ONLINE.names[em] || x.email || '';
+      ONLINE.canReqMap[x.id] = !!x.can_request;
     });
   } catch (e) {}
 }
