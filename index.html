@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 62 — разрешение на заявки</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 63 — форма смены пароля</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -2815,17 +2815,7 @@ async function openAccess(tab){
       alert(String(data) + (pass ? '\n\nПароль: ' + pass + '\nПередайте его сотруднику лично.' : '\n\nПароль не задан — сотрудник войдёт по ссылке из письма.'));
       openAccess('people');
     };
-    box.querySelectorAll('[data-pw]').forEach(b => b.onclick = async () => {
-      const em = b.dataset.pw;
-      const p1 = prompt('Новый пароль для ' + em + ' (минимум 6 символов):', '');
-      if (!p1) return;
-      if (p1.length < 6){ alert('Слишком короткий пароль'); return; }
-      const { data, error } = await ONLINE.client.rpc('admin_upsert_user',
-        { p_email: em, p_password: p1, p_role: '', p_note: null });
-      if (error){ alert('Не удалось: ' + error.message); return; }
-      alert('Пароль изменён.\n\n' + em + '\nПароль: ' + p1 + '\n\nПередайте его сотруднику лично.');
-      openAccess('people');
-    });
+    box.querySelectorAll('[data-pw]').forEach(b => b.onclick = () => openPasswordForm(b.dataset.pw));
     box.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
       const { error } = await ONLINE.client.from('profiles')
         .update({ active: b.dataset.on === '1' }).eq('id', b.dataset.act);
@@ -3646,6 +3636,43 @@ function bindRequestFlag(root){
     label.appendChild(document.createTextNode('заявки'));
     td.insertBefore(label, td.firstChild);
   });
+}
+/* смена пароля сотруднику — форма в карте, без системных окон */
+function openPasswordForm(email){
+  let ov = $('pwForm');
+  if (ov) ov.remove();
+  ov = document.createElement('div');
+  ov.id = 'pwForm';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:95;background:#fff;overflow:auto;padding:16px 16px calc(90px + env(safe-area-inset-bottom, 0px))';
+  ov.innerHTML = '<div style="max-width:560px;margin:0 auto">'
+    + '<h2 style="margin:0 0 6px;font-size:19px">Новый пароль</h2>'
+    + '<div style="color:#6b7885;font-size:13px;margin-bottom:14px">Сотрудник: <b>' + esc(email) + '</b></div>'
+    + '<label style="display:grid;gap:5px;font-size:13px;color:#4a5866">Пароль (не короче 6 символов)'
+    + '<input id="pwNew" type="text" value="' + escAttr('2026' + Math.random().toString(36).slice(2, 6)) + '" style="padding:13px;border:1px solid #cdd7e2;border-radius:10px;font-size:17px;font-family:monospace"></label>'
+    + '<div id="pwMsg" style="margin-top:12px;font-size:13.5px"></div>'
+    + '<div style="display:flex;gap:10px;margin-top:16px">'
+    + '<button class="btn primary" id="pwSave" style="padding:13px 22px;font-size:15px">Сохранить пароль</button>'
+    + '<button class="btn" id="pwClose" style="padding:13px 22px;font-size:15px">Отмена</button></div>'
+    + '<div style="margin-top:14px;color:#8b98a8;font-size:12.5px">Пароль показывается один раз — передайте его сотруднику лично и попросите сменить.</div>'
+    + '</div>';
+  document.body.appendChild(ov);
+  $('pwClose').onclick = () => ov.remove();
+  $('pwSave').onclick = async () => {
+    const val = ($('pwNew').value || '').trim();
+    const msg = $('pwMsg');
+    if (val.length < 6){ msg.innerHTML = '<span style="color:#b3261e">Пароль короче 6 символов</span>'; return; }
+    $('pwSave').disabled = true; $('pwSave').textContent = 'Сохраняем…';
+    const { error } = await ONLINE.client.rpc('admin_upsert_user', { p_email: email, p_password: val, p_role: '', p_note: null });
+    if (error){
+      $('pwSave').disabled = false; $('pwSave').textContent = 'Сохранить пароль';
+      msg.innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>';
+      return;
+    }
+    msg.innerHTML = '<div style="color:#1a7f4b;font-size:15px"><b>Пароль изменён.</b><br>'
+      + 'Сотрудник: ' + esc(email) + '<br>Пароль: <b style="font-family:monospace;font-size:17px">' + esc(val) + '</b></div>';
+    $('pwSave').disabled = false; $('pwSave').textContent = 'Сохранить ещё раз';
+  };
+  setTimeout(() => { const i = $('pwNew'); if (i){ i.focus(); i.select(); } }, 80);
 }
 /* ================= заявки: внеплановый ремонт ================= */
 ONLINE.requests = [];
