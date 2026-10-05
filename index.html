@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 59 — статусы и удаление заявок</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 60 — подпись кнопки списка</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -4927,6 +4927,8 @@ function setView(mode){
   document.body.classList.toggle('listmode', mode === 'list');
   const b = $('viewToggle');
   if (b) b.textContent = mode === 'list' ? '☰ Карта' : '☰ Список';
+  const vt = $('viewToggle');
+  if (vt) vt.textContent = (mode === 'list') ? '☰ Карта' : '☰ Список';
   if (mode === 'list'){
     // при переходе в список все линии свёрнуты — раскрыть можно кнопкой или нажатием на линию
     try { lvHide = (typeof LINES !== 'undefined' ? LINES : []).map(l => l.id); } catch (e) { lvHide = []; }
@@ -4945,6 +4947,7 @@ function ensureViewUI(){
     const tb = document.querySelector('.map-toolbar');
     const b = document.createElement('button');
     b.id = 'viewToggle';
+    b.textContent = (viewMode === 'list') ? '☰ Карта' : '☰ Список';
     b.title = 'Карта или список станций';
     b.onclick = () => setView(viewMode === 'list' ? 'map' : 'list');
     if (tb){ b.className = 'zbtn'; tb.appendChild(b); }
