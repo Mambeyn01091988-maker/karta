@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 53 — дистанции линий</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 54 — правка помещений</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -1802,6 +1802,7 @@ async function bootSession(){
     flushQueue();                      // и досылаем то, что накопилось
     loadMaint();                       // классы помещений, отметки ТО и ТР, календарь
     loadNames().then(startPresence);
+    loadRoomsDb();
     loadStationsDb().then(() => {
       try { applyLineOverrides(); applyStationOverrides(); refreshAll(); } catch (e) {}
       try { applyMapEdits(); } catch (e) {}   // точки станций по правкам из базы
@@ -3619,6 +3620,155 @@ function drawTO(){
     downloadCsv(lines.join('\r\n'), 'to-tr.csv');
   };
 }
+/* ============ этап 3: помещения ============ */
+ONLINE.roomsDb = Object.create(null);
+ONLINE.roomClasses = Object.create(null);
+let rmQuery = '';
+
+function roomKey(sid, group, num){ return sid + '|' + (group || '') + '|' + (num || ''); }
+
+async function loadRoomsDb(){
+  try {
+    const [r, c] = await Promise.all([
+      ONLINE.client.from('rooms_db').select('station_id,group_name,room_number,place,hidden').limit(5000),
+      ONLINE.client.from('room_class').select('station_id,room_number,class').limit(5000)
+    ]);
+    ONLINE.roomsDb = Object.create(null);
+    (r.data || []).forEach(x => { ONLINE.roomsDb[roomKey(x.station_id, x.group_name, x.room_number)] = x; });
+    ONLINE.roomClasses = Object.create(null);
+    (c.data || []).forEach(x => { ONLINE.roomClasses[x.station_id + '|' + x.room_number] = x.class; });
+  } catch (e) { ONLINE.roomsDb = Object.create(null); }
+}
+/* правки помещений применяем к строкам оборудования до построения структуры */
+function applyRoomOverrides(rows){
+  const db = ONLINE.roomsDb || {};
+  if (!Object.keys(db).length || !rows) return rows;
+  const out = [];
+  rows.forEach(r => {
+    const o = db[roomKey(r.station_id, r.group_name, r.room_number)];
+    if (!o) { out.push(r); return; }
+    if (o.hidden) return;                       // помещение скрыто — строки не показываем
+    const copy = Object.assign({}, r);
+    if (o.group_name) copy.group_name = o.group_name;
+    if (o.room_number) copy.room_number = o.room_number;
+    if (o.place) copy.place = o.place;
+    out.push(copy);
+  });
+  return out;
+}
+/* список помещений: собираем из данных */
+function roomList(){
+  const map = new Map();
+  (ONLINE.rows || []).forEach(r => {
+    const k = r.station_id + '|' + (r.group_name || '') + '|' + (r.room_number || '');
+    if (!map.has(k)) map.set(k, { sid: r.station_id, group: r.group_name || '', num: r.room_number || '',
+      place: r.place || '', units: 0 });
+    map.get(k).units++;
+  });
+  return Array.from(map.values());
+}
+function openRoomsEditor(){
+  if (!canEditNow()){ alert('Права на правку есть у роли «редактор» и «администратор».'); return; }
+  let ov = $('rmEdit');
+  if (!ov){
+    ov = document.createElement('div');
+    ov.id = 'rmEdit';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:91;background:#fff;overflow:auto;'
+      + 'padding:16px 16px calc(90px + env(safe-area-inset-bottom, 0px))';
+    document.body.appendChild(ov);
+  }
+  ov.style.display = 'block';
+  drawRooms();
+}
+const RM_CLASS = { heat:'с теплоизбытками', cold:'без теплоизбытков', depot:'депо' };
+function drawRooms(){
+  const ov = $('rmEdit'); if (!ov) return;
+  const q = rmQuery.trim().toLowerCase();
+  const all = roomList();
+  let list = all;
+  if (q) list = all.filter(x => [stationNameOf(x.sid), x.group, x.num, x.place].join(' ').toLowerCase().includes(q));
+  const shown = list.slice(0, 250);
+  const groups = Array.from(new Set(all.map(x => x.group).filter(Boolean))).sort();
+  ov.innerHTML = `<div style="max-width:1250px;margin:0 auto">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <h2 style="margin:0;font-size:19px">Помещения</h2>
+      <span class="chip">всего: ${all.length}</span>
+      <span style="flex:1"></span>
+      <button class="btn" id="rmClose">Закрыть</button>
+    </div>
+    <div style="color:#6b7885;font-size:12.5px;margin-bottom:10px">
+      Можно переименовать помещение, перенести его в другой раздел (например, в технические), сменить место,
+      скрыть или задать класс для ТО и ТР. Правки записываются в журнал.
+    </div>
+    <input id="rmSearch" type="search" value="${escAttr(rmQuery)}" placeholder="Поиск: станция, помещение, место…"
+      style="width:100%;padding:11px 13px;border:1px solid #cdd7e2;border-radius:10px;font-size:15px;margin-bottom:12px">
+    <div style="overflow:auto;max-height:calc(100vh - 320px);border:1px solid #e6ecf2;border-radius:12px">
+      <table class="tbl" style="width:100%">
+        <thead><tr><th>Станция</th><th>Раздел</th><th>Помещение</th><th>Место</th><th>Ед.</th><th>Класс ТО/ТР</th><th></th></tr></thead>
+        <tbody>${shown.map((x, i) => {
+          const cls = (ONLINE.roomClasses || {})[x.sid + '|' + x.num] || '';
+          const db = (ONLINE.roomsDb || {})[roomKey(x.sid, x.group, x.num)] || {};
+          return `<tr data-i="${i}" data-sid="${escAttr(x.sid)}" data-g="${escAttr(x.group)}" data-n="${escAttr(x.num)}">
+            <td>${esc(stationNameOf(x.sid))}</td>
+            <td><input class="rm-group" list="rmGroups" value="${escAttr(db.group_name || x.group)}" style="width:100%;min-width:150px;padding:7px 9px;border:1px solid #d7dfe8;border-radius:8px"></td>
+            <td><input class="rm-num" value="${escAttr(db.room_number || x.num)}" style="width:90px;padding:7px 9px;border:1px solid #d7dfe8;border-radius:8px"></td>
+            <td><input class="rm-place" value="${escAttr(db.place || x.place)}" style="width:130px;padding:7px 9px;border:1px solid #d7dfe8;border-radius:8px"></td>
+            <td>${x.units}</td>
+            <td><select class="rm-class" style="padding:7px 9px;border:1px solid #d7dfe8;border-radius:8px">
+              <option value="">—</option>
+              ${['heat','cold','depot'].map(k => `<option value="${k}"${cls === k ? ' selected' : ''}>${RM_CLASS[k]}</option>`).join('')}
+            </select></td>
+            <td style="white-space:nowrap">
+              <button class="btn rm-save" style="padding:6px 10px;font-size:12.5px">Сохранить</button>
+              <button class="btn rm-hide" style="padding:6px 10px;font-size:12.5px">${db.hidden ? 'Показать' : 'Скрыть'}</button>
+            </td></tr>`; }).join('')}</tbody></table>
+      ${!shown.length ? '<div class="empty">Ничего не найдено</div>' : ''}
+    </div>
+    <datalist id="rmGroups">${groups.map(g => '<option value="' + escAttr(g) + '"></option>').join('')}</datalist>
+    ${list.length > shown.length ? `<div class="empty">Показано ${shown.length} из ${list.length} — уточните поиск</div>` : ''}
+    <div id="rmMsg" style="margin-top:10px;font-size:13px"></div>
+  </div>`;
+  $('rmClose').onclick = () => { ov.style.display = 'none'; };
+  $('rmSearch').oninput = (e) => { rmQuery = e.target.value; const p = e.target.selectionStart; drawRooms(); const n = $('rmSearch'); if (n){ n.focus(); n.setSelectionRange(p, p); } };
+  ov.querySelectorAll('tr[data-i]').forEach(tr => {
+    const sid = tr.dataset.sid, g = tr.dataset.g, n = tr.dataset.n;
+    tr.querySelector('.rm-save').onclick = async () => {
+      const newG = tr.querySelector('.rm-group').value.trim();
+      const newN = tr.querySelector('.rm-num').value.trim();
+      const newP = tr.querySelector('.rm-place').value.trim();
+      const cls = tr.querySelector('.rm-class').value;
+      const msg = $('rmMsg');
+      const payload = { station_id: sid, group_name: g, room_number: n, place: newP };
+      const { error } = await ONLINE.client.from('rooms_db').upsert(payload, { onConflict: 'station_id,group_name,room_number' });
+      if (error){ msg.innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
+      // переименование/перенос помещения — это правка строк оборудования
+      if (newG !== g || newN !== n){
+        const upd = {};
+        if (newG !== g) upd.group_name = newG;
+        if (newN !== n) upd.room_number = newN;
+        const { error: e2 } = await ONLINE.client.from('equipment').update(upd)
+          .eq('station_id', sid).eq('group_name', g).eq('room_number', n);
+        if (e2){ msg.innerHTML = '<span style="color:#b3261e">Помещение не переименовано: ' + esc(e2.message) + '</span>'; return; }
+      }
+      if (cls){
+        const { error: e3 } = await ONLINE.client.from('room_class')
+          .upsert({ station_id: sid, room_number: (newN || n), class: cls }, { onConflict: 'station_id,room_number' });
+        if (e3){ msg.innerHTML = '<span style="color:#b3261e">Класс не сохранён: ' + esc(e3.message) + '</span>'; return; }
+      }
+      msg.innerHTML = '<span style="color:#1a7f4b">Сохранено: ' + esc(stationNameOf(sid)) + ', пом. ' + esc(newN || n) + '</span>';
+      location.reload();
+    };
+    tr.querySelector('.rm-hide').onclick = async () => {
+      const db = (ONLINE.roomsDb || {})[roomKey(sid, g, n)] || {};
+      const { error } = await ONLINE.client.from('rooms_db')
+        .upsert({ station_id: sid, group_name: g, room_number: n, hidden: !db.hidden },
+                { onConflict: 'station_id,group_name,room_number' });
+      if (error){ $('rmMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
+      location.reload();
+    };
+  });
+}
+
 /* ---- добавление станции: понятная форма вместо системных окон ---- */
 function showNewStationForm(){
   const list = (typeof LINES !== 'undefined' ? LINES : []);
@@ -4046,7 +4196,13 @@ function applyStationOverrides(){
 (function(){
   const orig = (typeof applyRows === 'function') ? applyRows : null;
   if (!orig) return;
-  applyRows = function(rows){ orig(rows); try { applyLineOverrides(); } catch (e) {} try { applyStationOverrides(); } catch (e) {} };
+  applyRows = function(rows){
+    let r = rows;
+    try { r = applyRoomOverrides(r); } catch (e) {}
+    orig(r);
+    try { applyLineOverrides(); } catch (e) {}
+    try { applyStationOverrides(); } catch (e) {}
+  };
 })();
 
 function lineOptions(sel){
@@ -4293,6 +4449,7 @@ function drawEqList(){
       <button class="btn" id="eqAdd">＋ Добавить</button>
       <button class="btn" id="stOpen">Станции</button>
       <button class="btn" id="lnOpen">Линии</button>
+      <button class="btn" id="rmOpen">Помещения</button>
       <button class="btn" id="eqListClose">Закрыть</button>
     </div>
     <input id="eqSearch" type="search" value="${escAttr(eqQuery)}" placeholder="Поиск: маркировка, инв. номер, модель, помещение, станция…"
@@ -4317,6 +4474,7 @@ function drawEqList(){
   $('eqListClose').onclick = () => { ov.style.display = 'none'; };
   const so = $('stOpen'); if (so) so.onclick = openStationsEditor;
   const lo = $('lnOpen'); if (lo) lo.onclick = openLinesEditor;
+  const ro = $('rmOpen'); if (ro) ro.onclick = openRoomsEditor;
   $('eqAdd').onclick = () => {
     const st = STATIONS.find(x => (x.groups || []).length);
     openEqEditor(null, { station_id: st ? st.id : '', line_id: st ? st.lineId : '' });
