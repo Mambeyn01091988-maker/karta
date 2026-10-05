@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 46 — живая схема</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 47 — откат перерисовки схемы</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -1804,7 +1804,7 @@ async function bootSession(){
     loadNames().then(startPresence);
     loadStationsDb().then(() => {
       try { applyLineOverrides(); applyStationOverrides(); refreshAll(); } catch (e) {}
-      try { redrawMapLive(); } catch (e) {}   // схема сразу с учётом правок из базы
+      // автоперерисовка схемы временно отключена: нужна доработка проекции
     });   // имена сотрудников и «кто сейчас в карте»
   } catch (e) {
     // нет связи — работаем по сохранённым данным
@@ -3625,6 +3625,8 @@ function liveEl(tag, attrs){
   for (const k in attrs) if (attrs[k] != null) e.setAttribute(k, attrs[k]);
   return e;
 }
+function mapX(s){ return (s.px != null) ? s.px : s.sx; }
+function mapY(s){ return (s.py != null) ? s.py : s.sy; }
 function lineColorOf(id){
   const l = (typeof LINES !== 'undefined' ? LINES : []).find(x => x.id === id);
   return (l && l.color) || '#8b98a8';
@@ -3653,9 +3655,9 @@ function redrawMapLive(){
     (typeof LINES !== 'undefined' ? LINES : []).forEach(l => {
       const pts = sts.filter(s => s.lineId === l.id).sort((a, b) => (a.number || 0) - (b.number || 0));
       if (pts.length < 2) return;
-      const cx = pts.reduce((n, s) => n + s.sx, 0) / pts.length;
-      const cy = pts.reduce((n, s) => n + s.sy, 0) / pts.length;
-      const dist = pts.map(s => Math.hypot(s.sx - cx, s.sy - cy));
+      const cx = pts.reduce((n, s) => n + mapX(s), 0) / pts.length;
+      const cy = pts.reduce((n, s) => n + mapY(s), 0) / pts.length;
+      const dist = pts.map(s => Math.hypot(mapX(s) - cx, mapY(s) - cy));
       const dmin = Math.min.apply(null, dist), dmax = Math.max.apply(null, dist);
       const ring = dmax > 0 && (dmax - dmin) / dmax < 0.12 && pts.length > 4;
       if (ring){
@@ -3663,20 +3665,20 @@ function redrawMapLive(){
         gL.appendChild(liveEl('circle', { cx, cy, r, fill:'none', stroke: lineColorOf(l.id),
           'stroke-width': strokeW, 'stroke-linecap':'round' }));
       } else {
-        const d = pts.map((s, i) => (i ? 'L' : 'M') + s.sx + ' ' + s.sy).join(' ');
+        const d = pts.map((s, i) => (i ? 'L' : 'M') + mapX(s) + ' ' + mapY(s)).join(' ');
         gL.appendChild(liveEl('path', { d, fill:'none', stroke: lineColorOf(l.id),
           'stroke-width': strokeW, 'stroke-linecap':'round', 'stroke-linejoin':'round' }));
       }
     });
 
     sts.forEach(s => {
-      const c = liveEl('circle', { cx: s.sx, cy: s.sy, r: dotR, fill:'#fff',
+      const c = liveEl('circle', { cx: mapX(s), cy: mapY(s), r: dotR, fill:'#fff',
         stroke: lineColorOf(s.lineId), 'stroke-width': 3 });
       c.style.cursor = 'pointer';
       c.onclick = () => { const st = STATIONS.find(x => x.id === s.id); if (st) gotoStation(st); };
       gS.appendChild(c);
       if (gLb){
-        const t = liveEl('text', { x: s.sx + Number(dotR) + 7, y: s.sy + 4, 'font-size': fontSize,
+        const t = liveEl('text', { x: mapX(s) + Number(dotR) + 7, y: mapY(s) + 4, 'font-size': fontSize,
           fill:'#20303f', 'font-weight': 600 });
         t.textContent = s.name || '';
         t.style.pointerEvents = 'none';
@@ -3687,13 +3689,12 @@ function redrawMapLive(){
   } catch (e) { return false; }
 }
 /* после любой правки станций или линий — перерисовываем схему */
-async function applyEditsAndRedraw(){
+async function applyEditsAndSafeReload(){
   await loadStationsDb();
   try { applyLineOverrides(); } catch (e) {}
   try { applyStationOverrides(); } catch (e) {}
   try { refreshAll(); } catch (e) {}
-  const ok = redrawMapLive();
-  return ok;
+  location.reload();
 }
 
 /* ============ этап 2: линии — название, цвет, порядок ============ */
@@ -3769,7 +3770,7 @@ function drawLines(){
     const { error } = await ONLINE.client.from('lines_db')
       .insert({ id: id.trim(), name: name.trim(), color: color.trim(), sort: 900 });
     if (error){ $('lnMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
-    await applyEditsAndRedraw();
+    await loadStationsDb(); location.reload();
   };
   ov.querySelectorAll('tr[data-ln]').forEach(tr => {
     const id = tr.dataset.ln;
@@ -3783,7 +3784,7 @@ function drawLines(){
       const { error } = await ONLINE.client.from('lines_db').upsert(payload, { onConflict: 'id' });
       if (error){ $('lnMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
       $('lnMsg').innerHTML = '<span style="color:#1a7f4b">Сохранено: ' + esc(payload.name) + '</span>';
-      await applyEditsAndRedraw(); renderList();
+      await loadStationsDb(); location.reload();
     };
     tr.querySelector('.ln-del').onclick = async () => {
       const cnt = tr.querySelector('td:nth-child(4)').textContent.trim();
@@ -3791,7 +3792,7 @@ function drawLines(){
         '\n\nЕсли станции есть — сначала перенесите их на другую линию. Продолжить?')) return;
       const { error } = await ONLINE.client.from('lines_db').delete().eq('id', id);
       if (error){ $('lnMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
-      await applyEditsAndRedraw();
+      await loadStationsDb(); location.reload();
     };
   });
 }
@@ -3909,7 +3910,7 @@ function drawStations(){
     const { error } = await ONLINE.client.from('stations_db')
       .insert({ id, name: name.trim(), line_id: (line || '').trim() || null, sort: 900, custom: true });
     if (error){ $('stMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
-    await applyEditsAndRedraw();
+    await loadStationsDb(); location.reload();
   };
   ov.querySelectorAll('tr[data-st]').forEach(tr => {
     const id = tr.dataset.st;
@@ -3921,14 +3922,14 @@ function drawStations(){
       const { error } = await ONLINE.client.from('stations_db').upsert(payload, { onConflict: 'id' });
       if (error){ $('stMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
       $('stMsg').innerHTML = '<span style="color:#1a7f4b">Сохранено: ' + esc(name) + '</span>';
-      await applyEditsAndRedraw();
+      await loadStationsDb(); location.reload();
     };
     tr.querySelector('.st-hide').onclick = async () => {
       const db = (ONLINE.stationsDb || {})[id] || {};
       const { error } = await ONLINE.client.from('stations_db')
         .upsert({ id, name: db.name || tr.querySelector('.st-name').value.trim(), hidden: !db.hidden }, { onConflict: 'id' });
       if (error){ $('stMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
-      await applyEditsAndRedraw();
+      await loadStationsDb(); location.reload();
     };
     tr.querySelector('.st-del').onclick = async () => {
       const cnt = tr.querySelector('td:nth-child(4)').textContent.trim();
@@ -3936,7 +3937,7 @@ function drawStations(){
         '\n\nЕсли оборудование есть — сначала перенесите его или скройте станцию. Продолжить?')) return;
       const { error } = await ONLINE.client.from('stations_db').delete().eq('id', id);
       if (error){ $('stMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
-      await applyEditsAndRedraw();
+      await loadStationsDb(); location.reload();
     };
   });
 }
