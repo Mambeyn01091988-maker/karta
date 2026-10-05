@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 52 — удаление станции</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 53 — дистанции линий</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -3896,6 +3896,7 @@ function applyLineOverrides(){
     if (l){
       if (o.name) l.name = o.name;
       if (o.color) l.color = o.color;
+      if (o.dist) l.dist = o.dist;
       if (typeof o.sort === 'number') l._sort = o.sort;
     } else if (!o.hidden){
       L.push({ id: o.id, name: o.name || o.id, color: o.color || '#888888', stationCount: 0, _sort: o.sort });
@@ -3933,12 +3934,13 @@ function drawLines(){
     </div>
     <div style="overflow:auto;max-height:calc(100vh - 300px);border:1px solid #e6ecf2;border-radius:12px">
       <table class="tbl" style="width:100%">
-        <thead><tr><th>Название</th><th>Цвет</th><th>Порядок</th><th>Станций</th><th></th></tr></thead>
+        <thead><tr><th>Название</th><th>Дистанция</th><th>Цвет</th><th>Порядок</th><th>Станций</th><th></th></tr></thead>
         <tbody>${L.map(l => {
           const d = db.find(x => x.id === l.id) || {};
           const cnt = (typeof STATIONS !== 'undefined') ? STATIONS.filter(s => s.lineId === l.id).length : (l.stationCount || 0);
           return `<tr data-ln="${escAttr(l.id)}">
             <td><input class="ln-name" value="${escAttr(l.name || '')}" style="width:100%;padding:8px 10px;border:1px solid #d7dfe8;border-radius:8px"></td>
+            <td><input class="ln-dist" value="${escAttr(d.dist || '')}" placeholder="№" style="width:64px;padding:8px;border:1px solid #d7dfe8;border-radius:8px"></td>
             <td><input class="ln-color" type="color" value="${escAttr(l.color || '#888888')}" style="width:52px;height:38px;border:1px solid #d7dfe8;border-radius:8px;background:#fff"></td>
             <td><input class="ln-sort" type="number" value="${d.sort != null ? d.sort : (l._sort != null ? l._sort : '')}" style="width:74px;padding:8px;border:1px solid #d7dfe8;border-radius:8px"></td>
             <td>${cnt}</td>
@@ -3971,6 +3973,7 @@ function drawLines(){
       const payload = {
         id,
         name: tr.querySelector('.ln-name').value.trim(),
+        dist: tr.querySelector('.ln-dist').value.trim(),
         color: tr.querySelector('.ln-color').value,
         sort: Number(tr.querySelector('.ln-sort').value || 100)
       };
@@ -4006,7 +4009,7 @@ async function loadStationsDb(){
   try {
     const [s, l] = await Promise.all([
       ONLINE.client.from('stations_db').select('id,name,line_id,sort,off_map,hidden,custom').limit(1000),
-      ONLINE.client.from('lines_db').select('id,name,color,sort').limit(100)
+      ONLINE.client.from('lines_db').select('id,name,color,sort,dist').limit(100)
     ]);
     ONLINE.stationsDb = Object.create(null);
     (s.data || []).forEach(x => { ONLINE.stationsDb[x.id] = x; });
