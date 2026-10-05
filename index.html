@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 54 — правка помещений</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 55 — перенос оборудования</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -4333,10 +4333,12 @@ function drawStations(){
 
 /* ============ полное редактирование прямо в карте ============ */
 const EQ_FIELDS = [
-  ['mark','Маркировка'], ['type','Тип'], ['model','Марка / модель'], ['inv','Инвентарный номер'],
-  ['num','№'], ['power','Мощность'], ['state','Состояние'], ['service','Служба'],
-  ['room_number','Помещение'], ['place','Место'], ['drain','Дренаж'], ['supply','Питание'],
-  ['responsible','Ответственный / телефон']
+  ['mark','Маркировка'], ['type','Тип'], ['model','Марка / модель'],
+  ['inv','Инвентарный номер'], ['inv_new','Новый инв. номер'], ['num','№'], ['num_abkisk','№ АБКиСК'],
+  ['power','Мощность'], ['state','Состояние'], ['service','Служба'],
+  ['group_name','Раздел'], ['room_number','Помещение'], ['place','Место'],
+  ['drain','Дренаж'], ['supply','Питание'], ['breaker','Автомат'], ['phone','Телефон'],
+  ['installed','Дата установки'], ['responsible','Ответственный'], ['source','Источник данных']
 ];
 function canEditNow(){
   const r = ONLINE.profile && ONLINE.profile.role;
@@ -4360,6 +4362,7 @@ function openEqEditor(id, prepend){
     <div style="color:#6b7885;font-size:13px;margin-bottom:14px">
       Станция: <b>${esc(stationNameOf(base.station_id || (ONLINE._curStation || '')) || '—')}</b>
       ${base.id ? ' · запись ' + esc(String(base.id).slice(0, 8)) : ''}
+      <br>Чтобы перенести единицу в другое помещение — измените «Раздел» и «Помещение».
       <br>Все изменения записываются в журнал с вашим именем и временем.
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
