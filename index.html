@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 50 — перенос точки станции</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 51 — добавление станции формой</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -3619,6 +3619,73 @@ function drawTO(){
     downloadCsv(lines.join('\r\n'), 'to-tr.csv');
   };
 }
+/* ---- добавление станции: понятная форма вместо системных окон ---- */
+function showNewStationForm(){
+  const list = (typeof LINES !== 'undefined' ? LINES : []);
+  if ($('stNew')) $('stNew').remove();
+  const box = document.createElement('div');
+  box.id = 'stNew';
+  box.style.cssText = 'position:fixed;inset:0;z-index:93;background:#fff;overflow:auto;padding:16px 16px calc(90px + env(safe-area-inset-bottom, 0px))';
+  const opts = list.map(l => '<option value="' + escAttr(l.id) + '">' + esc(l.name) + '</option>').join('');
+  const firstLine = (list[0] || {}).id || '';
+  const nextNum = ((typeof STATIONS !== 'undefined' ? STATIONS : []).filter(x => x.lineId === firstLine).length) + 1;
+  box.innerHTML = '<div style="max-width:620px;margin:0 auto">'
+    + '<h2 style="margin:0 0 12px;font-size:19px">Новая станция</h2>'
+    + '<div style="display:grid;gap:12px">'
+    + '<label style="display:grid;gap:5px;font-size:13px;color:#4a5866">Название станции'
+    + '<input id="nsName" placeholder="например Новая станция" style="padding:11px 13px;border:1px solid #cdd7e2;border-radius:10px;font-size:15px"></label>'
+    + '<label style="display:grid;gap:5px;font-size:13px;color:#4a5866">Линия'
+    + '<select id="nsLine" style="padding:11px 13px;border:1px solid #cdd7e2;border-radius:10px;font-size:15px">' + opts + '</select></label>'
+    + '<label style="display:grid;gap:5px;font-size:13px;color:#4a5866">Номер по порядку на линии'
+    + '<input id="nsNum" type="number" value="' + nextNum + '" style="padding:11px 13px;border:1px solid #cdd7e2;border-radius:10px;font-size:15px"></label>'
+    + '</div><div id="nsMsg" style="margin-top:12px;font-size:13px"></div>'
+    + '<div style="display:flex;gap:10px;margin-top:16px">'
+    + '<button class="btn primary" id="nsSave" style="padding:12px 22px;font-size:15px">Создать</button>'
+    + '<button class="btn" id="nsBack" style="padding:12px 22px;font-size:15px">Отмена</button></div></div>';
+  document.body.appendChild(box);
+  const lineSel = $('nsLine');
+  if (lineSel) lineSel.onchange = () => {
+    const n = ((typeof STATIONS !== 'undefined' ? STATIONS : []).filter(x => x.lineId === lineSel.value).length) + 1;
+    const num = $('nsNum'); if (num) num.value = n;
+  };
+  $('nsBack').onclick = () => box.remove();
+  $('nsSave').onclick = async () => {
+    const name = $('nsName').value.trim();
+    const line = $('nsLine').value;
+    const num = Number($('nsNum').value || 0) || 900;
+    const msg = $('nsMsg');
+    if (!name){ msg.innerHTML = '<span style="color:#b3261e">Укажите название станции</span>'; return; }
+    if (!ONLINE.client){ msg.innerHTML = '<span style="color:#b3261e">Нет связи с сервером — попробуйте позже</span>'; return; }
+    $('nsSave').disabled = true; $('nsSave').textContent = 'Создаём…';
+    const id = 'new-' + Date.now().toString(36);
+    const payload = { id, name, line_id: line || null, sort: num, number: num, custom: true };
+    const { error } = await ONLINE.client.from('stations_db').insert(payload);
+    if (error){
+      $('nsSave').disabled = false; $('nsSave').textContent = 'Создать';
+      msg.innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>';
+      return;
+    }
+    try { ONLINE.stationsDb[id] = payload; } catch (e) {}
+    box.remove();
+    try { applyStationOverrides(); } catch (e) {}
+    try { refreshAll(); } catch (e) {}
+    try { applyMapEdits(); } catch (e) {}
+    const l = list.find(x => x.id === line);
+    alert('Станция «' + name + '» добавлена' + (l ? ' на линию «' + l.name + '»' : '') + '.');
+  };
+  setTimeout(() => { const n = $('nsName'); if (n) n.focus(); }, 60);
+}
+/* подменяем обработчик кнопки после каждой отрисовки списка станций */
+(function(){
+  if (typeof drawStations !== 'function') return;
+  const orig = drawStations;
+  drawStations = function(){
+    orig.apply(this, arguments);
+    const b = $('stAdd');
+    if (b) b.onclick = () => showNewStationForm();
+  };
+})();
+
 /* ===== перенос точки станции на готовую линию: линии не перерисовываются ===== */
 const RING_LINES = ['5', '11'];   // Кольцевая и Большая кольцевая — окружности
 
