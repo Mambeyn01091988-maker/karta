@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 43 — правка станций</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 44 — кнопки шапки всегда на месте</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -3912,14 +3912,14 @@ function drawEqList(){
 function ensureEditButton(){
   if ($('btnEdit')) return;
   const anchor = $('btnHelp') || $('btnTO') || $('btnIn') || $('btnOut');
-  const host = anchor && anchor.parentElement;
-  if (!host) return;
-  if (!canEditNow()) return;
+  const place = barHost();
+  if (!place) return;
   const b = document.createElement('button');
-  b.id = 'btnEdit'; b.className = anchor.className || 'btn';
+  b.id = 'btnEdit'; b.className = (place.before && place.before.className) || 'btn';
   b.textContent = 'Правка';
+  b.style.display = canEditNow() ? '' : 'none';
   b.onclick = openEqList;
-  host.insertBefore(b, anchor);
+  if (place.before) place.host.insertBefore(b, place.before); else place.host.appendChild(b);
 }
 
 /* ================= памятка для сотрудников ================= */
@@ -3991,13 +3991,13 @@ function openHelp(){
 function ensureHelpButton(){
   if ($('btnHelp')) return;
   const anchor = $('btnTO') || $('btnIn') || $('btnOut');
-  const host = anchor && anchor.parentElement;
-  if (!host) return;
+  const place = barHost();
+  if (!place) return;
   const b = document.createElement('button');
-  b.id = 'btnHelp'; b.className = anchor.className || 'btn';
+  b.id = 'btnHelp'; b.className = (place.before && place.before.className) || 'btn';
   b.textContent = 'Памятка';
   b.onclick = openHelp;
-  host.insertBefore(b, anchor);
+  if (place.before) place.host.insertBefore(b, place.before); else place.host.appendChild(b);
 }
 
 /* ================= кто сейчас в карте (онлайн) ================= */
@@ -4068,14 +4068,13 @@ function startPresence(){
 }
 function ensureOnlineChip(){
   if ($('onlineChip')) return;
-  const anchor = $('btnIn') || $('btnOut');
-  const host = anchor && anchor.parentElement;
-  if (!host) return;
+  const place = barHost();
+  if (!place) return;
   const b = document.createElement('button');
   b.id = 'onlineChip'; b.className = 'btn';
   b.style.cssText = 'pointer-events:none;border:0;background:transparent;font-size:13px';
   b.textContent = '● в карте: 0';
-  host.insertBefore(b, anchor);
+  if (place.before) place.host.insertBefore(b, place.before); else place.host.appendChild(b);
   renderOnline();
 }
 
@@ -4320,18 +4319,25 @@ function openMarkForm(sid, room, kind){
 if ('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
+/* куда вставлять кнопки шапки */
+function barHost(){
+  const a = $('btnIn') || $('btnOut');
+  if (a && a.parentElement) return { host: a.parentElement, before: a };
+  const bar = $('authbar');
+  if (bar) return { host: bar, before: null };
+  return null;
+}
 function ensureTOButton(){
   if ($('btnTO')) return;
   // кнопка появляется рядом с «Войти» или «Выйти» — что есть в шапке
-  const anchor = $('btnIn') || $('btnOut');
-  const host = anchor && anchor.parentElement;
-  if (!anchor || !host) return;
+  const place = barHost();
+  if (!place) return;
   const b = document.createElement('button');
   b.id = 'btnTO';
-  b.className = anchor.className || 'btn';
+  b.className = (place.before && place.before.className) || 'btn';
   b.textContent = 'ТО и ТР';
   b.onclick = openTO;
-  host.insertBefore(b, anchor);
+  if (place.before) place.host.insertBefore(b, place.before); else place.host.appendChild(b);
 }
 /* сворачивание панелей: на телефоне карта сразу чистая */
 (function(){
@@ -4351,11 +4357,16 @@ function ensureTOButton(){
   paint();
   document.body.appendChild(b);
 })();
-ensureTOButton();
-ensureHelpButton();
-ensureEditButton();
+/* кнопки шапки: следим, чтобы они всегда были на месте после перерисовки панели */
+function ensureAllButtons(){
+  try { ensureTOButton(); } catch (e) {}
+  try { ensureHelpButton(); } catch (e) {}
+  try { ensureEditButton(); } catch (e) {}
+  try { ensureOnlineChip(); } catch (e) {}
+}
+ensureAllButtons();
 ensureViewUI();
-ensureOnlineChip();
+try { new MutationObserver(() => ensureAllButtons()).observe(document.body, { childList:true, subtree:true }); } catch (e) {}
 try { new MutationObserver(ensureTOButton).observe(document.body, { childList:true, subtree:true }); } catch (e) {}
 initOnline();
 
