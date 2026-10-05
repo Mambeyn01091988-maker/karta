@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 42 — правка оборудования в карте</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 43 — правка станций</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -1801,7 +1801,8 @@ async function bootSession(){
     saveCache();                       // сохраняем для работы без интернета
     flushQueue();                      // и досылаем то, что накопилось
     loadMaint();                       // классы помещений, отметки ТО и ТР, календарь
-    loadNames().then(startPresence);   // имена сотрудников и «кто сейчас в карте»
+    loadNames().then(startPresence);
+    loadStationsDb().then(() => { try { applyStationOverrides(); refreshAll(); } catch (e) {} });   // имена сотрудников и «кто сейчас в карте»
   } catch (e) {
     // нет связи — работаем по сохранённым данным
     const c = loadCache();
@@ -3615,6 +3616,151 @@ function drawTO(){
     downloadCsv(lines.join('\r\n'), 'to-tr.csv');
   };
 }
+/* ============ этап 1: станции — добавить, перенести, скрыть, удалить ============ */
+ONLINE.stationsDb = Object.create(null);
+let stQuery = '';
+
+async function loadStationsDb(){
+  try {
+    const [s, l] = await Promise.all([
+      ONLINE.client.from('stations_db').select('id,name,line_id,sort,off_map,hidden,custom').limit(1000),
+      ONLINE.client.from('lines_db').select('id,name,color,sort').limit(100)
+    ]);
+    ONLINE.stationsDb = Object.create(null);
+    (s.data || []).forEach(x => { ONLINE.stationsDb[x.id] = x; });
+    ONLINE.linesDb = l.data || [];
+  } catch (e) { ONLINE.stationsDb = Object.create(null); }
+}
+/* применяем правки к списку станций (скрытие, переименование, перенос) */
+function applyStationOverrides(){
+  const db = ONLINE.stationsDb || {};
+  if (!Object.keys(db).length) return;
+  const cur = (typeof STATIONS !== 'undefined') ? STATIONS : null;
+  if (!cur) return;
+  for (let i = cur.length - 1; i >= 0; i--){
+    const st = cur[i], o = db[st.id];
+    if (!o) continue;
+    if (o.hidden){ cur.splice(i, 1); continue; }
+    if (o.name) st.name = o.name;
+    if (o.line_id) st.lineId = o.line_id;
+    if (typeof o.sort === 'number') st._sort = o.sort;
+  }
+  Object.keys(db).forEach(id => {
+    const o = db[id];
+    if (!o.custom || o.hidden) return;
+    if (cur.some(s => s.id === id)) return;
+    cur.push({ id: o.id, name: o.name || 'Новая станция', lineId: o.line_id || null, offMap: false, groups: [], _custom: true });
+  });
+  cur.sort((a, b) => ((a._sort != null ? a._sort : 9999) - (b._sort != null ? b._sort : 9999)));
+}
+/* подключаемся к построению списка станций */
+(function(){
+  const orig = (typeof applyRows === 'function') ? applyRows : null;
+  if (!orig) return;
+  applyRows = function(rows){ orig(rows); try { applyStationOverrides(); } catch (e) {} };
+})();
+
+function lineOptions(sel){
+  const L = (typeof LINES !== 'undefined' && LINES.length) ? LINES : [];
+  return L.map(l => `<option value="${escAttr(l.id)}"${sel === l.id ? ' selected' : ''}>${esc(l.name)}</option>`).join('');
+}
+function openStationsEditor(){
+  if (!canEditNow()){ alert('Права на правку есть у роли «редактор» и «администратор».'); return; }
+  let ov = $('stEdit');
+  if (!ov){
+    ov = document.createElement('div');
+    ov.id = 'stEdit';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:91;background:#fff;overflow:auto;'
+      + 'padding:16px 16px calc(90px + env(safe-area-inset-bottom, 0px))';
+    document.body.appendChild(ov);
+  }
+  ov.style.display = 'block';
+  drawStations();
+}
+function drawStations(){
+  const ov = $('stEdit'); if (!ov) return;
+  const q = stQuery.trim().toLowerCase();
+  const all = (typeof STATIONS !== 'undefined') ? STATIONS : [];
+  const list = q ? all.filter(s => (s.name || '').toLowerCase().includes(q)) : all;
+  const shown = list.slice(0, 250);
+  ov.innerHTML = `<div style="max-width:1100px;margin:0 auto">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <h2 style="margin:0;font-size:19px">Станции</h2>
+      <span class="chip">всего: ${all.length}</span>
+      <span style="flex:1"></span>
+      <button class="btn primary" id="stAdd">＋ Новая станция</button>
+      <button class="btn" id="stClose">Закрыть</button>
+    </div>
+    <div style="color:#6b7885;font-size:12.5px;margin-bottom:10px">
+      Здесь можно переименовать станцию, перенести её на другую линию, скрыть с карты или удалить.
+      Все правки записываются в журнал.
+    </div>
+    <input id="stSearch" type="search" value="${escAttr(stQuery)}" placeholder="Поиск станции…"
+      style="width:100%;padding:11px 13px;border:1px solid #cdd7e2;border-radius:10px;font-size:15px;margin-bottom:12px">
+    <div style="overflow:auto;max-height:calc(100vh - 300px);border:1px solid #e6ecf2;border-radius:12px">
+      <table class="tbl" style="width:100%">
+        <thead><tr><th>Название</th><th>Линия</th><th>Порядок</th><th>Ед.</th><th></th></tr></thead>
+        <tbody>${shown.map(s => {
+          const db = (ONLINE.stationsDb || {})[s.id] || {};
+          const cnt = (s.groups || []).reduce((n, g) => n + (g.rooms || []).reduce((m, r) => m + (r.systems || []).length, 0), 0);
+          return `<tr data-st="${escAttr(s.id)}">
+            <td><input class="st-name" value="${escAttr(s.name || '')}" style="width:100%;padding:8px 10px;border:1px solid #d7dfe8;border-radius:8px"></td>
+            <td><select class="st-line" style="padding:8px 10px;border:1px solid #d7dfe8;border-radius:8px">
+              <option value="">— без линии —</option>${lineOptions(s.lineId)}</select></td>
+            <td><input class="st-sort" type="number" value="${db.sort != null ? db.sort : ''}" style="width:74px;padding:8px;border:1px solid #d7dfe8;border-radius:8px"></td>
+            <td>${cnt}</td>
+            <td style="white-space:nowrap">
+              <button class="btn st-save" style="padding:6px 10px;font-size:12.5px">Сохранить</button>
+              <button class="btn st-hide" style="padding:6px 10px;font-size:12.5px">${s.hidden ? 'Показать' : 'Скрыть'}</button>
+              <button class="btn st-del" style="padding:6px 10px;font-size:12.5px;color:#b3261e">Удалить</button>
+            </td></tr>`; }).join('')}</tbody></table>
+      ${!shown.length ? '<div class="empty">Ничего не найдено</div>' : ''}
+    </div>
+    ${list.length > shown.length ? `<div class="empty">Показано ${shown.length} из ${list.length} — уточните поиск</div>` : ''}
+    <div id="stMsg" style="margin-top:10px;font-size:13px"></div>
+  </div>`;
+  $('stClose').onclick = () => { ov.style.display = 'none'; };
+  $('stSearch').oninput = (e) => { stQuery = e.target.value; const p = e.target.selectionStart; drawStations(); const n = $('stSearch'); if (n){ n.focus(); n.setSelectionRange(p, p); } };
+  $('stAdd').onclick = async () => {
+    const name = prompt('Название новой станции:', '');
+    if (!name) return;
+    const line = prompt('Линия (id: ' + ((typeof LINES !== 'undefined' ? LINES : []).map(l => l.id).join(', ') || '—') + ')\nМожно оставить пустым и указать позже:', '');
+    const id = 'new-' + Date.now().toString(36);
+    const { error } = await ONLINE.client.from('stations_db')
+      .insert({ id, name: name.trim(), line_id: (line || '').trim() || null, sort: 900, custom: true });
+    if (error){ $('stMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
+    await loadStationsDb(); location.reload();
+  };
+  ov.querySelectorAll('tr[data-st]').forEach(tr => {
+    const id = tr.dataset.st;
+    tr.querySelector('.st-save').onclick = async () => {
+      const name = tr.querySelector('.st-name').value.trim();
+      const line = tr.querySelector('.st-line').value || null;
+      const sortRaw = tr.querySelector('.st-sort').value;
+      const payload = { id, name, line_id: line, sort: sortRaw === '' ? null : Number(sortRaw) };
+      const { error } = await ONLINE.client.from('stations_db').upsert(payload, { onConflict: 'id' });
+      if (error){ $('stMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
+      $('stMsg').innerHTML = '<span style="color:#1a7f4b">Сохранено: ' + esc(name) + '</span>';
+      await loadStationsDb(); applyStationOverrides(); refreshAll();
+    };
+    tr.querySelector('.st-hide').onclick = async () => {
+      const db = (ONLINE.stationsDb || {})[id] || {};
+      const { error } = await ONLINE.client.from('stations_db')
+        .upsert({ id, name: db.name || tr.querySelector('.st-name').value.trim(), hidden: !db.hidden }, { onConflict: 'id' });
+      if (error){ $('stMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
+      await loadStationsDb(); location.reload();
+    };
+    tr.querySelector('.st-del').onclick = async () => {
+      const cnt = tr.querySelector('td:nth-child(4)').textContent.trim();
+      if (!confirm('Удалить станцию «' + tr.querySelector('.st-name').value + '»?\n\nЗа ней закреплено единиц оборудования: ' + cnt +
+        '\n\nЕсли оборудование есть — сначала перенесите его или скройте станцию. Продолжить?')) return;
+      const { error } = await ONLINE.client.from('stations_db').delete().eq('id', id);
+      if (error){ $('stMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
+      await loadStationsDb(); location.reload();
+    };
+  });
+}
+
 /* ============ полное редактирование прямо в карте ============ */
 const EQ_FIELDS = [
   ['mark','Маркировка'], ['type','Тип'], ['model','Марка / модель'], ['inv','Инвентарный номер'],
@@ -3731,6 +3877,7 @@ function drawEqList(){
       <span class="chip">всего: ${all.length}</span>
       <span style="flex:1"></span>
       <button class="btn" id="eqAdd">＋ Добавить</button>
+      <button class="btn" id="stOpen">Станции</button>
       <button class="btn" id="eqListClose">Закрыть</button>
     </div>
     <input id="eqSearch" type="search" value="${escAttr(eqQuery)}" placeholder="Поиск: маркировка, инв. номер, модель, помещение, станция…"
@@ -3753,6 +3900,7 @@ function drawEqList(){
     ${list.length > shown.length ? `<div class="empty">Показано ${shown.length} из ${list.length} — уточните поиск</div>` : ''}
   </div>`;
   $('eqListClose').onclick = () => { ov.style.display = 'none'; };
+  const so = $('stOpen'); if (so) so.onclick = openStationsEditor;
   $('eqAdd').onclick = () => {
     const st = STATIONS.find(x => (x.groups || []).length);
     openEqEditor(null, { station_id: st ? st.id : '', line_id: st ? st.lineId : '' });
