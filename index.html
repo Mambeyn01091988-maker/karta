@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 55 — перенос оборудования</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 56 — кнопка свернуть/развернуть</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -4809,7 +4809,16 @@ renderList = function(){
   $('toMapBtn').onclick = () => setView('map');
   const inp = $('lvSearch');
   inp.oninput = (e) => { lvQuery = e.target.value; const p = e.target.selectionStart; renderList(); const n = $('lvSearch'); if (n){ n.focus(); n.setSelectionRange(p, p); } };
-  $('lvAll').onclick = () => { lvHide = []; try { localStorage.setItem('karta-lv-hide', '[]'); } catch (e) {} renderList(); };
+  const allLines = (typeof LINES !== 'undefined' ? LINES : []).map(l => l.id);
+  const allHidden = allLines.length > 0 && allLines.every(id => lvHide.indexOf(id) >= 0);
+  const btnAll = $('lvAll');
+  btnAll.textContent = (lvHide.length && !allHidden) ? 'Развернуть все' : (allHidden ? 'Развернуть все' : 'Свернуть все');
+  btnAll.onclick = () => {
+    const allH = allLines.length > 0 && allLines.every(id => lvHide.indexOf(id) >= 0);
+    lvHide = allH ? [] : allLines.slice();      // свернуть все или развернуть все
+    try { localStorage.setItem('karta-lv-hide', JSON.stringify(lvHide)); } catch (e) {}
+    renderList();
+  };
   box.querySelectorAll('[data-lv]').forEach(h => h.onclick = () => {
     const id = h.dataset.lv;
     lvHide = lvHide.indexOf(id) >= 0 ? lvHide.filter(x => x !== id) : lvHide.concat([id]);
