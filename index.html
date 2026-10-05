@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 40 — надёжный вход по паролю</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 41 — понятный журнал изменений</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -2575,6 +2575,57 @@ function startOfflineRetry(){
   offlineTimer = setInterval(() => { retryOnline(); }, 20000);
 }
 
+/* ---- журнал изменений: понятные подписи ---- */
+const FIELD_RU = {
+  'verified_at':'отметка «проверено»', 'verified_by':'кто проверил', 'verify_note':'комментарий к сверке',
+  'state':'состояние', 'model':'марка/модель', 'type':'тип', 'inv':'инвентарный номер', 'service':'служба',
+  'drain':'дренаж', 'supply':'питание', 'responsible':'ответственный', 'num':'№', 'room_number':'помещение',
+  'place':'место', 'mark':'маркировка', 'kind':'вид работ', 'done_at':'дата выполнения', 'note':'примечание',
+  'file_path':'протокол', 'fire_system':'пожаротушение', 'fire_model':'модель установки',
+  'fire_complete':'комплектность', 'fire_expiry':'срок годности', 'count':'количество', 'name':'название',
+  'room':'помещение', 'title':'название схемы', 'diagram_date':'дата схемы', 'class':'класс помещения'
+};
+function fieldLabel(r){ return FIELD_RU[r.field] || r.field || ''; }
+function eqIndex(){
+  if (!ONLINE._eqIdx){
+    ONLINE._eqIdx = {};
+    (ONLINE.rows || []).forEach(x => { if (x.id) ONLINE._eqIdx[x.id] = x; });
+  }
+  return ONLINE._eqIdx;
+}
+function entityLabel(r){
+  const kind = { equipment:'оборудование', assemblies:'сборка', diagrams:'схема' };
+  let base = kind[r.entity] || r.entity || '';
+  const eq = eqIndex()[r.entity_id];
+  if (eq){
+    const st = (typeof STATIONS !== 'undefined' ? STATIONS : []).find(x => x.id === eq.station_id);
+    const bits = [st ? st.name : '', eq.room_number ? 'пом. ' + eq.room_number : '', eq.mark || ''].filter(Boolean);
+    if (bits.length) base = bits.join(' · ');
+  } else if (r.entity === 'diagrams' && r.entity_id){
+    const d = (ONLINE.diagrams || []).find(x => x.id === r.entity_id);
+    if (d){
+      const st = (typeof STATIONS !== 'undefined' ? STATIONS : []).find(x => x.id === d.station_id);
+      base = (st ? st.name + ' · ' : '') + (d.title || 'схема');
+    }
+  }
+  return base;
+}
+function valLabel(v, field){
+  if (v === null || v === undefined || v === '') return '—';
+  const str = String(v);
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str)){
+    for (const k in (ONLINE.names || {})){ /* подпись по почте */ }
+    const u = (ONLINE.users || {})[str];
+    return u || 'сотрудник (' + str.slice(0, 8) + ')';
+  }
+  if (/^\d{4}-\d{2}-\d{2}T/.test(str)){
+    const d = new Date(str);
+    return d.toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  }
+  if (field === 'verified_at') return str;
+  return str.length > 60 ? str.slice(0, 60) + '…' : str;
+}
+
 async function logAccess(action){
   if (!ONLINE.ready || !ONLINE.user) return;
   try {
@@ -2676,11 +2727,11 @@ async function openAccess(tab){
         <tbody>${list.map(r => `<tr>
           <td>${esc(new Date(r.at).toLocaleString('ru-RU'))}</td>
           <td>${whoLabel(r.actor_email)}</td>
-          <td>${esc(kind[r.entity] || r.entity || '')}</td>
+          <td>${esc(entityLabel(r))}</td>
           <td>${esc(act[r.action] || r.action || '')}</td>
-          <td>${esc(r.field || '')}</td>
-          <td>${esc((r.old_value || '').slice(0, 40))}</td>
-          <td>${esc((r.new_value || '').slice(0, 40))}</td></tr>`).join('')}</tbody></table>`
+          <td>${esc(fieldLabel(r))}</td>
+          <td>${esc(valLabel(r.old_value, r.field))}</td>
+          <td>${esc(valLabel(r.new_value, r.field))}</td></tr>`).join('')}</tbody></table>`
         : '<div class="empty">Изменений пока не было</div>';
       $('chCount').textContent = `${list.length} из ${rows.length} записей`;
     };
@@ -3657,8 +3708,16 @@ function onlineList(){
 }
 async function loadNames(){
   try {
-    const { data } = await ONLINE.client.from('allowed_emails').select('email,note');
-    (data || []).forEach(x => { if (x.note) ONLINE.names[String(x.email).toLowerCase()] = x.note; });
+    const [ae, pr] = await Promise.all([
+      ONLINE.client.from('allowed_emails').select('email,note'),
+      ONLINE.client.from('profiles').select('id,email')
+    ]);
+    (ae.data || []).forEach(x => { if (x.note) ONLINE.names[String(x.email).toLowerCase()] = x.note; });
+    ONLINE.users = {};
+    (pr.data || []).forEach(x => {
+      const em = String(x.email || '').toLowerCase();
+      ONLINE.users[x.id] = ONLINE.names[em] || x.email || '';
+    });
   } catch (e) {}
 }
 function renderOnline(){
