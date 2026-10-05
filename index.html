@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 48 — живая схема включена</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 49 — вид схемы как прежде</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -1804,7 +1804,7 @@ async function bootSession(){
     loadNames().then(startPresence);
     loadStationsDb().then(() => {
       try { applyLineOverrides(); applyStationOverrides(); refreshAll(); } catch (e) {}
-      try { redrawMapLive(); } catch (e) {}   // схема с учётом правок из базы
+      // перерисовка схемы отключена: требуется доработка внешнего вида
     });   // имена сотрудников и «кто сейчас в карте»
   } catch (e) {
     // нет связи — работаем по сохранённым данным
@@ -3697,13 +3697,12 @@ function redrawMapLive(){
   } catch (e) { return false; }
 }
 /* после любой правки станций или линий — перерисовываем схему */
-async function applyEditsAndRedraw(){
+async function applyEditsAndReload(){
   await loadStationsDb();
   try { applyLineOverrides(); } catch (e) {}
   try { applyStationOverrides(); } catch (e) {}
   try { refreshAll(); } catch (e) {}
-  const ok = redrawMapLive();
-  return ok;
+  location.reload();
 }
 
 /* ============ этап 2: линии — название, цвет, порядок ============ */
@@ -3779,7 +3778,7 @@ function drawLines(){
     const { error } = await ONLINE.client.from('lines_db')
       .insert({ id: id.trim(), name: name.trim(), color: color.trim(), sort: 900 });
     if (error){ $('lnMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
-    await applyEditsAndRedraw();
+    await loadStationsDb(); location.reload();
   };
   ov.querySelectorAll('tr[data-ln]').forEach(tr => {
     const id = tr.dataset.ln;
@@ -3793,7 +3792,7 @@ function drawLines(){
       const { error } = await ONLINE.client.from('lines_db').upsert(payload, { onConflict: 'id' });
       if (error){ $('lnMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
       $('lnMsg').innerHTML = '<span style="color:#1a7f4b">Сохранено: ' + esc(payload.name) + '</span>';
-      await applyEditsAndRedraw();
+      await loadStationsDb(); location.reload();
     };
     tr.querySelector('.ln-del').onclick = async () => {
       const cnt = tr.querySelector('td:nth-child(4)').textContent.trim();
@@ -3801,7 +3800,7 @@ function drawLines(){
         '\n\nЕсли станции есть — сначала перенесите их на другую линию. Продолжить?')) return;
       const { error } = await ONLINE.client.from('lines_db').delete().eq('id', id);
       if (error){ $('lnMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
-      await applyEditsAndRedraw();
+      await loadStationsDb(); location.reload();
     };
   });
 }
@@ -3919,7 +3918,7 @@ function drawStations(){
     const { error } = await ONLINE.client.from('stations_db')
       .insert({ id, name: name.trim(), line_id: (line || '').trim() || null, sort: 900, custom: true });
     if (error){ $('stMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
-    await applyEditsAndRedraw();
+    await loadStationsDb(); location.reload();
   };
   ov.querySelectorAll('tr[data-st]').forEach(tr => {
     const id = tr.dataset.st;
@@ -3931,14 +3930,14 @@ function drawStations(){
       const { error } = await ONLINE.client.from('stations_db').upsert(payload, { onConflict: 'id' });
       if (error){ $('stMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
       $('stMsg').innerHTML = '<span style="color:#1a7f4b">Сохранено: ' + esc(name) + '</span>';
-      await applyEditsAndRedraw();
+      await loadStationsDb(); location.reload();
     };
     tr.querySelector('.st-hide').onclick = async () => {
       const db = (ONLINE.stationsDb || {})[id] || {};
       const { error } = await ONLINE.client.from('stations_db')
         .upsert({ id, name: db.name || tr.querySelector('.st-name').value.trim(), hidden: !db.hidden }, { onConflict: 'id' });
       if (error){ $('stMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
-      await applyEditsAndRedraw();
+      await loadStationsDb(); location.reload();
     };
     tr.querySelector('.st-del').onclick = async () => {
       const cnt = tr.querySelector('td:nth-child(4)').textContent.trim();
@@ -3946,7 +3945,7 @@ function drawStations(){
         '\n\nЕсли оборудование есть — сначала перенесите его или скройте станцию. Продолжить?')) return;
       const { error } = await ONLINE.client.from('stations_db').delete().eq('id', id);
       if (error){ $('stMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
-      await applyEditsAndRedraw();
+      await loadStationsDb(); location.reload();
     };
   });
 }
