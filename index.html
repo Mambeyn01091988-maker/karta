@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 49 — вид схемы как прежде</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 50 — перенос точки станции</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -1804,7 +1804,7 @@ async function bootSession(){
     loadNames().then(startPresence);
     loadStationsDb().then(() => {
       try { applyLineOverrides(); applyStationOverrides(); refreshAll(); } catch (e) {}
-      // перерисовка схемы отключена: требуется доработка внешнего вида
+      try { applyMapEdits(); } catch (e) {}   // точки станций по правкам из базы
     });   // имена сотрудников и «кто сейчас в карте»
   } catch (e) {
     // нет связи — работаем по сохранённым данным
@@ -3619,6 +3619,119 @@ function drawTO(){
     downloadCsv(lines.join('\r\n'), 'to-tr.csv');
   };
 }
+/* ===== перенос точки станции на готовую линию: линии не перерисовываются ===== */
+const RING_LINES = ['5', '11'];   // Кольцевая и Большая кольцевая — окружности
+
+function mapStationEls(){
+  const g = $('stationsG');
+  if (!g) return [];
+  return Array.from(g.querySelectorAll('g.station'));
+}
+function mapPos(el){
+  const m = /translate\(\s*([-\d.]+)[ ,]+([-\d.]+)/.exec(el.getAttribute('transform') || '');
+  return m ? { x: +m[1], y: +m[2] } : null;
+}
+function mapSetPos(el, x, y){
+  el.setAttribute('transform', 'translate(' + x.toFixed(1) + ' ' + y.toFixed(1) + ')');
+}
+function mapLabelFor(name){
+  const lb = $('labelsG');
+  if (!lb || !name) return null;
+  return Array.from(lb.querySelectorAll('text')).find(t => (t.textContent || '').trim() === name) || null;
+}
+function mapSetLabel(name, x, y){
+  const t = mapLabelFor(name);
+  if (!t) return;
+  const dx = Number(t.getAttribute('x')) - 0, dy = 0;   // сохраняем относительный сдвиг подписи
+  t.setAttribute('x', String(x));
+  t.setAttribute('y', String(y));
+}
+/* положение новой точки на линии: между соседями по порядку */
+function placeOnLine(lineId, number, base, els){
+  const on = Object.keys(base).filter(id => base[id].line === lineId && els[id]);
+  if (!on.length) return null;
+  const ordered = on.map(id => ({ id, n: (STATIONS.find(s => s.id === id) || {}).number, ...base[id] }))
+    .filter(o => o.n != null).sort((a, b) => a.n - b.n);
+  if (ordered.length < 2) return ordered[0] ? { x: ordered[0].x, y: ordered[0].y } : null;
+  const n = number == null ? (ordered[ordered.length - 1].n + 1) : number;
+  if (RING_LINES.indexOf(String(lineId)) >= 0){
+    const cx = ordered.reduce((s, o) => s + o.x, 0) / ordered.length;
+    const cy = ordered.reduce((s, o) => s + o.y, 0) / ordered.length;
+    const r = ordered.reduce((s, o) => s + Math.hypot(o.x - cx, o.y - cy), 0) / ordered.length;
+    const ang = o => Math.atan2(o.y - cy, o.x - cx);
+    const norm = a => (a + Math.PI * 2) % (Math.PI * 2);
+    const a = ordered.map(o => ({ ...o, a: norm(ang(o)) })).sort((p, q) => p.n - q.n);
+    let prev = a[a.length - 1], next = a[0];
+    for (let i = 0; i < a.length - 1; i++) if (a[i].n <= n && n <= a[i + 1].n){ prev = a[i]; next = a[i + 1]; break; }
+    let d = norm(next.a - prev.a);
+    if (d > Math.PI) d -= Math.PI * 2;
+    const t = (next.n === prev.n) ? 0.5 : Math.min(1, Math.max(0, (n - prev.n) / (next.n - prev.n)));
+    const A = prev.a + d * t;
+    return { x: cx + r * Math.cos(A), y: cy + r * Math.sin(A) };
+  }
+  // прямая линия: интерполяция между соседями
+  for (let i = 0; i < ordered.length - 1; i++){
+    if (ordered[i].n <= n && n <= ordered[i + 1].n){
+      const p = ordered[i], q = ordered[i + 1];
+      const t = (q.n === p.n) ? 0.5 : (n - p.n) / (q.n - p.n);
+      return { x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t };
+    }
+  }
+  // за пределами линии — продолжаем по направлению последнего отрезка
+  const last = ordered[ordered.length - 1], prev = ordered[ordered.length - 2];
+  const k = (n - last.n) / Math.max(1, (last.n - prev.n));
+  return { x: last.x + (last.x - prev.x) * k, y: last.y + (last.y - prev.y) * k };
+}
+function applyMapEdits(){
+  try {
+    const els = {};
+    mapStationEls().forEach(el => { els[el.dataset.id] = el; });
+    if (!Object.keys(els).length) return false;
+    const overrides = ONLINE.stationsDb || {};
+    // исходные позиции — считаем один раз, до правок
+    const base = {};
+    Object.keys(els).forEach(id => { const p = mapPos(els[id]); if (p) base[id] = { x: p.x, y: p.y, line: els[id].dataset.line }; });
+
+    // 1) скрытие
+    Object.keys(els).forEach(id => {
+      const o = overrides[id];
+      const hidden = !!(o && o.hidden);
+      els[id].style.display = hidden ? 'none' : '';
+    });
+    // 2) перенос на другую линию
+    Object.keys(els).forEach(id => {
+      const o = overrides[id];
+      if (!o || o.hidden || !o.line_id) return;
+      if (String(o.line_id) === String(els[id].dataset.line)) return;
+      const st = (typeof STATIONS !== 'undefined' ? STATIONS : []).find(s => s.id === id) || {};
+      const dest = placeOnLine(String(o.line_id), st.number, base, els);
+      if (!dest) return;
+      if (els[id].style.display === 'none') els[id].style.display = '';
+      mapSetPos(els[id], dest.x, dest.y);
+      els[id].dataset.line = String(o.line_id);
+      const t = mapLabelFor(st.name);
+      if (t){ t.setAttribute('x', String(dest.x + 46)); t.setAttribute('y', String(dest.y + 4)); }
+    });
+    // 3) добавленные станции: копия существующей точки той же линии
+    Object.keys(overrides).forEach(id => {
+      const o = overrides[id];
+      if (!o || !o.custom || o.hidden || els[id]) return;
+      const st = (typeof STATIONS !== 'undefined' ? STATIONS : []).find(s => s.id === id);
+      if (!st || !o.line_id) return;
+      const sampleId = Object.keys(base).find(k => base[k].line === String(o.line_id));
+      if (!sampleId) return;
+      const copy = els[sampleId].cloneNode(true);
+      copy.dataset.id = id; copy.dataset.line = String(o.line_id);
+      copy.setAttribute('aria-label', (st.name || '') + ', новая станция');
+      const dest = placeOnLine(String(o.line_id), st.number, base, els);
+      if (dest) mapSetPos(copy, dest.x, dest.y);
+      els[sampleId].parentNode.appendChild(copy);
+      els[id] = copy;
+    });
+    return true;
+  } catch (e) { return false; }
+}
+
 /* ============ живая схема: перерисовка после правок ============ */
 function liveEl(tag, attrs){
   const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -3697,12 +3810,13 @@ function redrawMapLive(){
   } catch (e) { return false; }
 }
 /* после любой правки станций или линий — перерисовываем схему */
-async function applyEditsAndReload(){
+async function applyEditsAndMap(){
   await loadStationsDb();
   try { applyLineOverrides(); } catch (e) {}
   try { applyStationOverrides(); } catch (e) {}
   try { refreshAll(); } catch (e) {}
-  location.reload();
+  try { applyLineOverrides(); applyStationOverrides(); refreshAll(); applyMapEdits(); } catch (e) {}
+  return true;
 }
 
 /* ============ этап 2: линии — название, цвет, порядок ============ */
@@ -3778,7 +3892,11 @@ function drawLines(){
     const { error } = await ONLINE.client.from('lines_db')
       .insert({ id: id.trim(), name: name.trim(), color: color.trim(), sort: 900 });
     if (error){ $('lnMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
-    await loadStationsDb(); location.reload();
+    await loadStationsDb();
+  try { applyLineOverrides(); applyStationOverrides(); } catch (e) {}
+  try { refreshAll(); } catch (e) {}
+  try { applyMapEdits(); } catch (e) {}
+  return true;
   };
   ov.querySelectorAll('tr[data-ln]').forEach(tr => {
     const id = tr.dataset.ln;
@@ -3792,7 +3910,11 @@ function drawLines(){
       const { error } = await ONLINE.client.from('lines_db').upsert(payload, { onConflict: 'id' });
       if (error){ $('lnMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
       $('lnMsg').innerHTML = '<span style="color:#1a7f4b">Сохранено: ' + esc(payload.name) + '</span>';
-      await loadStationsDb(); location.reload();
+      await loadStationsDb();
+  try { applyLineOverrides(); applyStationOverrides(); } catch (e) {}
+  try { refreshAll(); } catch (e) {}
+  try { applyMapEdits(); } catch (e) {}
+  return true;
     };
     tr.querySelector('.ln-del').onclick = async () => {
       const cnt = tr.querySelector('td:nth-child(4)').textContent.trim();
@@ -3800,7 +3922,11 @@ function drawLines(){
         '\n\nЕсли станции есть — сначала перенесите их на другую линию. Продолжить?')) return;
       const { error } = await ONLINE.client.from('lines_db').delete().eq('id', id);
       if (error){ $('lnMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
-      await loadStationsDb(); location.reload();
+      await loadStationsDb();
+  try { applyLineOverrides(); applyStationOverrides(); } catch (e) {}
+  try { refreshAll(); } catch (e) {}
+  try { applyMapEdits(); } catch (e) {}
+  return true;
     };
   });
 }
@@ -3918,7 +4044,11 @@ function drawStations(){
     const { error } = await ONLINE.client.from('stations_db')
       .insert({ id, name: name.trim(), line_id: (line || '').trim() || null, sort: 900, custom: true });
     if (error){ $('stMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
-    await loadStationsDb(); location.reload();
+    await loadStationsDb();
+  try { applyLineOverrides(); applyStationOverrides(); } catch (e) {}
+  try { refreshAll(); } catch (e) {}
+  try { applyMapEdits(); } catch (e) {}
+  return true;
   };
   ov.querySelectorAll('tr[data-st]').forEach(tr => {
     const id = tr.dataset.st;
@@ -3930,14 +4060,22 @@ function drawStations(){
       const { error } = await ONLINE.client.from('stations_db').upsert(payload, { onConflict: 'id' });
       if (error){ $('stMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
       $('stMsg').innerHTML = '<span style="color:#1a7f4b">Сохранено: ' + esc(name) + '</span>';
-      await loadStationsDb(); location.reload();
+      await loadStationsDb();
+  try { applyLineOverrides(); applyStationOverrides(); } catch (e) {}
+  try { refreshAll(); } catch (e) {}
+  try { applyMapEdits(); } catch (e) {}
+  return true;
     };
     tr.querySelector('.st-hide').onclick = async () => {
       const db = (ONLINE.stationsDb || {})[id] || {};
       const { error } = await ONLINE.client.from('stations_db')
         .upsert({ id, name: db.name || tr.querySelector('.st-name').value.trim(), hidden: !db.hidden }, { onConflict: 'id' });
       if (error){ $('stMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
-      await loadStationsDb(); location.reload();
+      await loadStationsDb();
+  try { applyLineOverrides(); applyStationOverrides(); } catch (e) {}
+  try { refreshAll(); } catch (e) {}
+  try { applyMapEdits(); } catch (e) {}
+  return true;
     };
     tr.querySelector('.st-del').onclick = async () => {
       const cnt = tr.querySelector('td:nth-child(4)').textContent.trim();
@@ -3945,7 +4083,11 @@ function drawStations(){
         '\n\nЕсли оборудование есть — сначала перенесите его или скройте станцию. Продолжить?')) return;
       const { error } = await ONLINE.client.from('stations_db').delete().eq('id', id);
       if (error){ $('stMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
-      await loadStationsDb(); location.reload();
+      await loadStationsDb();
+  try { applyLineOverrides(); applyStationOverrides(); } catch (e) {}
+  try { refreshAll(); } catch (e) {}
+  try { applyMapEdits(); } catch (e) {}
+  return true;
     };
   });
 }
