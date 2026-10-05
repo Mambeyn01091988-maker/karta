@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 63 — форма смены пароля</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 64 — заявки обновляются сами</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -3776,6 +3776,7 @@ function openNewRequest(pre){
   };
   setTimeout(() => { const s = $('rqRoom'); if (s) s.focus(); }, 80);
 }
+let rqTimer = null;
 function openRequests(){
   let ov = $('rqList');
   if (!ov){
@@ -3787,6 +3788,14 @@ function openRequests(){
   }
   ov.style.display = 'block';
   drawRequests();
+  loadRequests().then(() => { try { drawRequests(); } catch (e) {} });
+  if (rqTimer) clearInterval(rqTimer);
+  rqTimer = setInterval(async () => {
+    const el = $('rqList');
+    if (!el || el.style.display === 'none'){ clearInterval(rqTimer); rqTimer = null; return; }
+    await loadRequests();
+    if ($('rqList') && $('rqList').style.display !== 'none') drawRequests();
+  }, 30000);
 }
 function drawRequests(){
   const ov = $('rqList'); if (!ov) return;
@@ -3807,6 +3816,7 @@ function drawRequests(){
     + '<span class="chip" style="background:#fff4d6;color:#9a6b00">в работе: ' + cnt(['принята','в работе']) + '</span>'
     + '<span class="chip" style="background:#e6f5ec;color:#1a7f4b">выполнено: ' + cnt(['выполнена','закрыта']) + '</span>'
     + '<span style="flex:1"></span>'
+    + '<button class="btn" id="rqRefresh">Обновить</button>'
     + (canRequestNow() ? '<button class="btn primary" id="rqAdd">＋ Заявка</button>' : '')
     + '<button class="btn" id="rqClose">Закрыть</button></div>'
     + (function(){
@@ -3868,6 +3878,8 @@ function drawRequests(){
           + '</div>'; }).join('') : '<div class="empty">Заявок нет</div>')
     + '</div>';
   $('rqClose').onclick = () => { ov.style.display = 'none'; };
+  const rf = $('rqRefresh');
+  if (rf) rf.onclick = async () => { rf.textContent = 'Обновляем…'; await loadRequests(); drawRequests(); };
   const add = $('rqAdd'); if (add) add.onclick = () => openNewRequest();
   $('rqSearch').oninput = (e) => { rqQuery = e.target.value; const p = e.target.selectionStart; drawRequests(); const n = $('rqSearch'); if (n){ n.focus(); n.setSelectionRange(p, p); } };
   ov.querySelectorAll('[data-rf]').forEach(b => b.onclick = () => { rqFilter = b.dataset.rf; drawRequests(); });
