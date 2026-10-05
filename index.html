@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 44 — кнопки шапки всегда на месте</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 45 — правка линий</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -1802,7 +1802,7 @@ async function bootSession(){
     flushQueue();                      // и досылаем то, что накопилось
     loadMaint();                       // классы помещений, отметки ТО и ТР, календарь
     loadNames().then(startPresence);
-    loadStationsDb().then(() => { try { applyStationOverrides(); refreshAll(); } catch (e) {} });   // имена сотрудников и «кто сейчас в карте»
+    loadStationsDb().then(() => { try { applyLineOverrides(); applyStationOverrides(); refreshAll(); } catch (e) {} });   // имена сотрудников и «кто сейчас в карте»
   } catch (e) {
     // нет связи — работаем по сохранённым данным
     const c = loadCache();
@@ -3616,6 +3616,106 @@ function drawTO(){
     downloadCsv(lines.join('\r\n'), 'to-tr.csv');
   };
 }
+/* ============ этап 2: линии — название, цвет, порядок ============ */
+function applyLineOverrides(){
+  const db = ONLINE.linesDb || [];
+  const L = (typeof LINES !== 'undefined') ? LINES : null;
+  if (!L || !db.length) return;
+  db.forEach(o => {
+    const l = L.find(x => x.id === o.id);
+    if (l){
+      if (o.name) l.name = o.name;
+      if (o.color) l.color = o.color;
+      if (typeof o.sort === 'number') l._sort = o.sort;
+    } else if (!o.hidden){
+      L.push({ id: o.id, name: o.name || o.id, color: o.color || '#888888', stationCount: 0, _sort: o.sort });
+    }
+  });
+  try { L.sort((a, b) => ((a._sort != null ? a._sort : 999) - (b._sort != null ? b._sort : 999))); } catch (e) {}
+}
+function openLinesEditor(){
+  if (!canEditNow()){ alert('Права на правку есть у роли «редактор» и «администратор».'); return; }
+  let ov = $('lnEdit');
+  if (!ov){
+    ov = document.createElement('div');
+    ov.id = 'lnEdit';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:91;background:#fff;overflow:auto;'
+      + 'padding:16px 16px calc(90px + env(safe-area-inset-bottom, 0px))';
+    document.body.appendChild(ov);
+  }
+  ov.style.display = 'block';
+  drawLines();
+}
+function drawLines(){
+  const ov = $('lnEdit'); if (!ov) return;
+  const L = (typeof LINES !== 'undefined') ? LINES : [];
+  const db = ONLINE.linesDb || [];
+  ov.innerHTML = `<div style="max-width:900px;margin:0 auto">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <h2 style="margin:0;font-size:19px">Линии</h2>
+      <span class="chip">всего: ${L.length}</span>
+      <span style="flex:1"></span>
+      <button class="btn primary" id="lnAdd">＋ Новая линия</button>
+      <button class="btn" id="lnClose">Закрыть</button>
+    </div>
+    <div style="color:#6b7885;font-size:12.5px;margin-bottom:10px">
+      Здесь меняются названия линий, цвета и порядок в списках и фильтрах. Изменения видны сразу после сохранения.
+    </div>
+    <div style="overflow:auto;max-height:calc(100vh - 300px);border:1px solid #e6ecf2;border-radius:12px">
+      <table class="tbl" style="width:100%">
+        <thead><tr><th>Название</th><th>Цвет</th><th>Порядок</th><th>Станций</th><th></th></tr></thead>
+        <tbody>${L.map(l => {
+          const d = db.find(x => x.id === l.id) || {};
+          const cnt = (typeof STATIONS !== 'undefined') ? STATIONS.filter(s => s.lineId === l.id).length : (l.stationCount || 0);
+          return `<tr data-ln="${escAttr(l.id)}">
+            <td><input class="ln-name" value="${escAttr(l.name || '')}" style="width:100%;padding:8px 10px;border:1px solid #d7dfe8;border-radius:8px"></td>
+            <td><input class="ln-color" type="color" value="${escAttr(l.color || '#888888')}" style="width:52px;height:38px;border:1px solid #d7dfe8;border-radius:8px;background:#fff"></td>
+            <td><input class="ln-sort" type="number" value="${d.sort != null ? d.sort : (l._sort != null ? l._sort : '')}" style="width:74px;padding:8px;border:1px solid #d7dfe8;border-radius:8px"></td>
+            <td>${cnt}</td>
+            <td style="white-space:nowrap">
+              <button class="btn ln-save" style="padding:6px 10px;font-size:12.5px">Сохранить</button>
+              <button class="btn ln-del" style="padding:6px 10px;font-size:12.5px;color:#b3261e">Удалить</button>
+            </td></tr>`; }).join('')}</tbody></table>
+    </div>
+    <div id="lnMsg" style="margin-top:10px;font-size:13px"></div>
+  </div>`;
+  $('lnClose').onclick = () => { ov.style.display = 'none'; };
+  $('lnAdd').onclick = async () => {
+    const name = prompt('Название новой линии:', '');
+    if (!name) return;
+    const id = prompt('Короткий код линии (латиницей или цифрами), например 15:', '');
+    if (!id) return;
+    const color = prompt('Цвет в виде #RRGGBB (можно оставить так):', '#7a8b9c') || '#7a8b9c';
+    const { error } = await ONLINE.client.from('lines_db')
+      .insert({ id: id.trim(), name: name.trim(), color: color.trim(), sort: 900 });
+    if (error){ $('lnMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
+    await loadStationsDb(); location.reload();
+  };
+  ov.querySelectorAll('tr[data-ln]').forEach(tr => {
+    const id = tr.dataset.ln;
+    tr.querySelector('.ln-save').onclick = async () => {
+      const payload = {
+        id,
+        name: tr.querySelector('.ln-name').value.trim(),
+        color: tr.querySelector('.ln-color').value,
+        sort: Number(tr.querySelector('.ln-sort').value || 100)
+      };
+      const { error } = await ONLINE.client.from('lines_db').upsert(payload, { onConflict: 'id' });
+      if (error){ $('lnMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
+      $('lnMsg').innerHTML = '<span style="color:#1a7f4b">Сохранено: ' + esc(payload.name) + '</span>';
+      await loadStationsDb(); applyLineOverrides(); refreshAll(); renderList();
+    };
+    tr.querySelector('.ln-del').onclick = async () => {
+      const cnt = tr.querySelector('td:nth-child(4)').textContent.trim();
+      if (!confirm('Удалить линию «' + tr.querySelector('.ln-name').value + '»?\n\nСтанций на ней: ' + cnt +
+        '\n\nЕсли станции есть — сначала перенесите их на другую линию. Продолжить?')) return;
+      const { error } = await ONLINE.client.from('lines_db').delete().eq('id', id);
+      if (error){ $('lnMsg').innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(error.message) + '</span>'; return; }
+      await loadStationsDb(); location.reload();
+    };
+  });
+}
+
 /* ============ этап 1: станции — добавить, перенести, скрыть, удалить ============ */
 ONLINE.stationsDb = Object.create(null);
 let stQuery = '';
@@ -3657,7 +3757,7 @@ function applyStationOverrides(){
 (function(){
   const orig = (typeof applyRows === 'function') ? applyRows : null;
   if (!orig) return;
-  applyRows = function(rows){ orig(rows); try { applyStationOverrides(); } catch (e) {} };
+  applyRows = function(rows){ orig(rows); try { applyLineOverrides(); } catch (e) {} try { applyStationOverrides(); } catch (e) {} };
 })();
 
 function lineOptions(sel){
@@ -3878,6 +3978,7 @@ function drawEqList(){
       <span style="flex:1"></span>
       <button class="btn" id="eqAdd">＋ Добавить</button>
       <button class="btn" id="stOpen">Станции</button>
+      <button class="btn" id="lnOpen">Линии</button>
       <button class="btn" id="eqListClose">Закрыть</button>
     </div>
     <input id="eqSearch" type="search" value="${escAttr(eqQuery)}" placeholder="Поиск: маркировка, инв. номер, модель, помещение, станция…"
@@ -3901,6 +4002,7 @@ function drawEqList(){
   </div>`;
   $('eqListClose').onclick = () => { ov.style.display = 'none'; };
   const so = $('stOpen'); if (so) so.onclick = openStationsEditor;
+  const lo = $('lnOpen'); if (lo) lo.onclick = openLinesEditor;
   $('eqAdd').onclick = () => {
     const st = STATIONS.find(x => (x.groups || []).length);
     openEqEditor(null, { station_id: st ? st.id : '', line_id: st ? st.lineId : '' });
