@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 41 — понятный журнал изменений</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 42 — правка оборудования в карте</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -3615,6 +3615,165 @@ function drawTO(){
     downloadCsv(lines.join('\r\n'), 'to-tr.csv');
   };
 }
+/* ============ полное редактирование прямо в карте ============ */
+const EQ_FIELDS = [
+  ['mark','Маркировка'], ['type','Тип'], ['model','Марка / модель'], ['inv','Инвентарный номер'],
+  ['num','№'], ['power','Мощность'], ['state','Состояние'], ['service','Служба'],
+  ['room_number','Помещение'], ['place','Место'], ['drain','Дренаж'], ['supply','Питание'],
+  ['responsible','Ответственный / телефон']
+];
+function canEditNow(){
+  const r = ONLINE.profile && ONLINE.profile.role;
+  return r === 'editor' || r === 'admin';
+}
+function openEqEditor(id, prepend){
+  if (!canEditNow()){ alert('Права на правку есть у роли «редактор» и «администратор». Обратитесь к администратору схемы.'); return; }
+  const row = id ? (ONLINE.rows || []).find(x => x.id === id) : null;
+  if (id && !row){ alert('Запись не найдена — обновите карту'); return; }
+  let ov = $('eqEdit');
+  if (!ov){
+    ov = document.createElement('div');
+    ov.id = 'eqEdit';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:92;background:#fff;overflow:auto;'
+      + 'padding:16px 16px calc(90px + env(safe-area-inset-bottom, 0px))';
+    document.body.appendChild(ov);
+  }
+  const base = row || (prepend || {});
+  ov.innerHTML = `<div style="max-width:760px;margin:0 auto">
+    <h2 style="margin:0 0 4px;font-size:19px">${row ? 'Изменить оборудование' : 'Добавить оборудование'}</h2>
+    <div style="color:#6b7885;font-size:13px;margin-bottom:14px">
+      Станция: <b>${esc(stationNameOf(base.station_id || (ONLINE._curStation || '')) || '—')}</b>
+      ${base.id ? ' · запись ' + esc(String(base.id).slice(0, 8)) : ''}
+      <br>Все изменения записываются в журнал с вашим именем и временем.
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+      ${EQ_FIELDS.map(([k, label]) => `<label style="display:grid;gap:5px;font-size:13px;color:#4a5866">${label}
+        <input data-f="${k}" value="${escAttr(base[k] == null ? '' : String(base[k]))}"
+          style="padding:10px 12px;border:1px solid #cdd7e2;border-radius:10px;font-size:15px"></label>`).join('')}
+    </div>
+    <div id="eqMsg" style="margin-top:12px;font-size:13px"></div>
+    <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
+      <button class="btn primary" id="eqSave" style="padding:12px 22px;font-size:15px">${row ? 'Сохранить' : 'Добавить'}</button>
+      <button class="btn" id="eqBack" style="padding:12px 22px;font-size:15px">← Назад</button>
+      ${row ? '<button class="btn" id="eqDel" style="padding:12px 22px;font-size:15px;color:#b3261e">Удалить</button>' : ''}
+    </div></div>`;
+  ov.style.display = 'block';
+  $('eqBack').onclick = () => { ov.style.display = 'none'; };
+  const collect = () => {
+    const o = {};
+    ov.querySelectorAll('[data-f]').forEach(i => { o[i.dataset.f] = i.value.trim(); });
+    return o;
+  };
+  $('eqSave').onclick = async () => {
+    const vals = collect();
+    const msg = $('eqMsg'); msg.textContent = ''; 
+    $('eqSave').disabled = true; $('eqSave').textContent = 'Сохраняем…';
+    try {
+      if (row){
+        const { error } = await ONLINE.client.from('equipment').update(vals).eq('id', row.id);
+        if (error) throw new Error(error.message);
+      } else {
+        const payload = Object.assign({}, vals, { station_id: base.station_id, line_id: base.line_id });
+        const { error } = await ONLINE.client.from('equipment').insert(payload);
+        if (error) throw new Error(error.message);
+      }
+      await reloadAll(); applyRows(ONLINE.rows); refreshAll(); saveCache();
+      ov.style.display = 'none';
+      alert(row ? 'Изменения сохранены.' : 'Оборудование добавлено.');
+    } catch (e) {
+      $('eqSave').disabled = false; $('eqSave').textContent = row ? 'Сохранить' : 'Добавить';
+      msg.innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(e.message || String(e)) + '</span>';
+    }
+  };
+  const del = $('eqDel');
+  if (del) del.onclick = async () => {
+    if (!confirm('Удалить эту единицу оборудования? Запись останется в журнале.')) return;
+    const { error } = await ONLINE.client.from('equipment').delete().eq('id', row.id);
+    if (error){ $('eqMsg').innerHTML = '<span style="color:#b3261e">Не удалось удалить: ' + esc(error.message) + '</span>'; return; }
+    await reloadAll(); applyRows(ONLINE.rows); refreshAll(); saveCache();
+    ov.style.display = 'none';
+  };
+}
+function eqEditButtonHTML(id){
+  if (!canEditNow()) return '';
+  return `<button class="btn eq-edit" data-eq="${escAttr(id)}" style="padding:6px 12px;font-size:13px">✎ Изменить</button>`;
+}
+function bindEqEditors(root){
+  (root || document).querySelectorAll('.eq-edit').forEach(b => b.onclick = (e) => { e.stopPropagation(); openEqEditor(b.dataset.eq); });
+}
+
+/* ---- экран правки: список оборудования с поиском ---- */
+let eqQuery = '';
+function openEqList(){
+  if (!canEditNow()){ alert('Права на правку есть у роли «редактор» и «администратор».'); return; }
+  let ov = $('eqList');
+  if (!ov){
+    ov = document.createElement('div');
+    ov.id = 'eqList';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:90;background:#fff;overflow:auto;'
+      + 'padding:16px 16px calc(90px + env(safe-area-inset-bottom, 0px))';
+    document.body.appendChild(ov);
+  }
+  ov.style.display = 'block';
+  drawEqList();
+}
+function drawEqList(){
+  const ov = $('eqList'); if (!ov) return;
+  const q = eqQuery.trim().toLowerCase();
+  const all = (ONLINE.rows || []);
+  let list = all;
+  if (q) list = all.filter(r => [r.mark, r.inv, r.model, r.type, r.room_number, r.place, stationNameOf(r.station_id)]
+    .join(' ').toLowerCase().includes(q));
+  const shown = list.slice(0, 200);
+  ov.innerHTML = `<div style="max-width:1150px;margin:0 auto">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <h2 style="margin:0;font-size:19px">Правка оборудования</h2>
+      <span class="chip">всего: ${all.length}</span>
+      <span style="flex:1"></span>
+      <button class="btn" id="eqAdd">＋ Добавить</button>
+      <button class="btn" id="eqListClose">Закрыть</button>
+    </div>
+    <input id="eqSearch" type="search" value="${escAttr(eqQuery)}" placeholder="Поиск: маркировка, инв. номер, модель, помещение, станция…"
+      style="width:100%;padding:11px 13px;border:1px solid #cdd7e2;border-radius:10px;font-size:15px;margin-bottom:12px">
+    <div style="overflow:auto;max-height:calc(100vh - 260px);border:1px solid #e6ecf2;border-radius:12px">
+      <table class="tbl" style="width:100%">
+        <thead><tr><th>Станция</th><th>Пом.</th><th>Место</th><th>Маркировка</th><th>Модель</th><th>Инв. номер</th><th>Состояние</th><th></th></tr></thead>
+        <tbody>${shown.map(r => `<tr>
+          <td>${esc(stationNameOf(r.station_id))}</td>
+          <td>${esc(r.room_number || '')}</td>
+          <td>${esc(r.place || '')}</td>
+          <td><b>${esc(r.mark || '')}</b></td>
+          <td>${esc(r.model || '')}</td>
+          <td>${esc(r.inv || '')}</td>
+          <td>${esc(r.state || '')}</td>
+          <td><button class="btn eq-edit" data-eq="${escAttr(r.id)}" style="padding:5px 11px;font-size:12.5px">✎</button></td>
+        </tr>`).join('')}</tbody></table>
+      ${!shown.length ? '<div class="empty">Ничего не найдено</div>' : ''}
+    </div>
+    ${list.length > shown.length ? `<div class="empty">Показано ${shown.length} из ${list.length} — уточните поиск</div>` : ''}
+  </div>`;
+  $('eqListClose').onclick = () => { ov.style.display = 'none'; };
+  $('eqAdd').onclick = () => {
+    const st = STATIONS.find(x => (x.groups || []).length);
+    openEqEditor(null, { station_id: st ? st.id : '', line_id: st ? st.lineId : '' });
+  };
+  const inp = $('eqSearch');
+  inp.oninput = (e) => { eqQuery = e.target.value; const p = e.target.selectionStart; drawEqList(); const n = $('eqSearch'); if (n){ n.focus(); n.setSelectionRange(p, p); } };
+  bindEqEditors(ov);
+}
+function ensureEditButton(){
+  if ($('btnEdit')) return;
+  const anchor = $('btnHelp') || $('btnTO') || $('btnIn') || $('btnOut');
+  const host = anchor && anchor.parentElement;
+  if (!host) return;
+  if (!canEditNow()) return;
+  const b = document.createElement('button');
+  b.id = 'btnEdit'; b.className = anchor.className || 'btn';
+  b.textContent = 'Правка';
+  b.onclick = openEqList;
+  host.insertBefore(b, anchor);
+}
+
 /* ================= памятка для сотрудников ================= */
 function openHelp(){
   let ov = $('helpOverlay');
@@ -3816,6 +3975,7 @@ function renderList(){
     const st = STATIONS.find(s => s.id === b.dataset.st);
     if (st) gotoStation(st, { forceCard:true });
   });
+  bindEqEditors(box);
 }
 function setView(mode){
   viewMode = mode;
@@ -4045,6 +4205,7 @@ function ensureTOButton(){
 })();
 ensureTOButton();
 ensureHelpButton();
+ensureEditButton();
 ensureViewUI();
 ensureOnlineChip();
 try { new MutationObserver(ensureTOButton).observe(document.body, { childList:true, subtree:true }); } catch (e) {}
