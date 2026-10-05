@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 57 — список открывается свёрнутым</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 58 — заявки</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -1802,6 +1802,7 @@ async function bootSession(){
     flushQueue();                      // и досылаем то, что накопилось
     loadMaint();                       // классы помещений, отметки ТО и ТР, календарь
     loadNames().then(startPresence);
+    loadRequests();
     loadRoomsDb();
     loadStationsDb().then(() => {
       try { applyLineOverrides(); applyStationOverrides(); refreshAll(); } catch (e) {}
@@ -3620,6 +3621,186 @@ function drawTO(){
     downloadCsv(lines.join('\r\n'), 'to-tr.csv');
   };
 }
+/* ================= заявки: внеплановый ремонт ================= */
+ONLINE.requests = [];
+ONLINE.canRequest = false;
+const RQ_CATS = [
+  ['отказ', 'ОТКАЗ ОБОРУДОВАНИЯ'], ['течь', 'ТЕЧЬ ВОДЫ'], ['загрязнение', 'ЗАГРЯЗНЕНИЕ'],
+  ['электрика', 'ЭЛЕКТРИКА'], ['шум', 'ШУМ / ВИБРАЦИЯ'], ['другое', 'ДРУГОЕ']
+];
+const RQ_STATUS = { 'новая':'Новая', 'принята':'Принята', 'в работе':'В работе', 'выполнена':'Выполнена', 'закрыта':'Закрыта', 'отклонена':'Отклонена' };
+let rqFilter = 'active', rqQuery = '';
+
+async function loadRequests(){
+  try {
+    const { data } = await ONLINE.client.from('requests').select('*').order('created_at', { ascending:false }).limit(1000);
+    ONLINE.requests = data || [];
+  } catch (e) { ONLINE.requests = []; }
+  try {
+    const p = await ONLINE.client.from('profiles').select('can_request').eq('id', ONLINE.user.id).single();
+    ONLINE.canRequest = !!(p.data && p.data.can_request) || (ONLINE.profile && ONLINE.profile.role === 'admin');
+  } catch (e) { ONLINE.canRequest = !!(ONLINE.profile && ONLINE.profile.role === 'admin'); }
+}
+function canRequestNow(){
+  const r = ONLINE.profile && ONLINE.profile.role;
+  return ONLINE.canRequest || r === 'admin' || r === 'editor';
+}
+function rqRecentStations(){
+  const seen = [];
+  (ONLINE.requests || []).forEach(x => { if (x.station_id && seen.indexOf(x.station_id) < 0) seen.push(x.station_id); });
+  return seen.slice(0, 5);
+}
+function openNewRequest(pre){
+  if (!canRequestNow()){ alert('Вносить заявки может администратор или сотрудник, которому это разрешено.'); return; }
+  let ov = $('rqNew');
+  if (ov) ov.remove();
+  ov = document.createElement('div');
+  ov.id = 'rqNew';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:94;background:#fff;overflow:auto;padding:14px 14px calc(30px + env(safe-area-inset-bottom, 0px))';
+  const recent = rqRecentStations();
+  const opts = (typeof STATIONS !== 'undefined' ? STATIONS : []).filter(s => (s.groups || []).length)
+    .sort((a, b) => (recent.indexOf(b.id) - recent.indexOf(a.id)))
+    .map(s => '<option value="' + escAttr(s.id) + '">' + esc(s.name) + '</option>').join('');
+  ov.innerHTML = '<div style="max-width:680px;margin:0 auto">'
+    + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><h2 style="margin:0;font-size:19px">Новая заявка</h2><span style="flex:1"></span>'
+    + '<button class="btn" id="rqCancel">Отмена</button></div>'
+    + '<label style="display:grid;gap:5px;font-size:13px;color:#4a5866;margin-bottom:10px">Станция'
+    + '<select id="rqStation" style="padding:13px;border:1px solid #cdd7e2;border-radius:10px;font-size:16px">' + opts + '</select></label>'
+    + '<div style="display:flex;gap:10px;margin-bottom:10px">'
+    + '<label style="display:grid;gap:5px;font-size:13px;color:#4a5866;flex:1">Помещение'
+    + '<input id="rqRoom" value="' + escAttr((pre && pre.room) || '') + '" style="padding:13px;border:1px solid #cdd7e2;border-radius:10px;font-size:16px"></label>'
+    + '<label style="display:grid;gap:5px;font-size:13px;color:#4a5866;flex:1">Место'
+    + '<input id="rqPlace" value="' + escAttr((pre && pre.place) || '') + '" style="padding:13px;border:1px solid #cdd7e2;border-radius:10px;font-size:16px"></label></div>'
+    + '<div style="font-size:13px;color:#4a5866;margin-bottom:6px">Что случилось?</div>'
+    + '<div id="rqCats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:12px">'
+    + RQ_CATS.map(c => '<button type="button" class="btn rq-cat" data-cat="' + c[0] + '" style="padding:16px 8px;font-size:13px;font-weight:700">' + c[1] + '</button>').join('')
+    + '</div>'
+    + '<label style="display:grid;gap:5px;font-size:13px;color:#4a5866;margin-bottom:10px">Описание (необязательно)'
+    + '<input id="rqDesc" placeholder="например: течёт с потолка возле щита" style="padding:13px;border:1px solid #cdd7e2;border-radius:10px;font-size:16px"></label>'
+    + '<label style="display:grid;gap:5px;font-size:13px;color:#4a5866;margin-bottom:10px">Фото (необязательно)'
+    + '<input id="rqPhoto" type="file" accept="image/*" capture="environment" style="font-size:14px"></label>'
+    + '<label style="display:grid;gap:5px;font-size:13px;color:#4a5866;margin-bottom:10px">Кто сообщил'
+    + '<input id="rqSource" placeholder="диспетчер, дежурная по станции…" style="padding:13px;border:1px solid #cdd7e2;border-radius:10px;font-size:16px"></label>'
+    + '<div id="rqMsg" style="font-size:13px;margin-bottom:10px"></div>'
+    + '<button class="btn primary" id="rqSend" style="width:100%;padding:18px;font-size:17px;font-weight:700">ОТПРАВИТЬ ЗАЯВКУ</button></div>';
+  document.body.appendChild(ov);
+  let cat = '';
+  ov.querySelectorAll('.rq-cat').forEach(b => b.onclick = () => {
+    cat = b.dataset.cat;
+    ov.querySelectorAll('.rq-cat').forEach(x => { x.classList.remove('primary'); x.style.background = ''; x.style.color = ''; });
+    b.classList.add('primary');
+  });
+  $('rqCancel').onclick = () => ov.remove();
+  $('rqSend').onclick = async () => {
+    const msg = $('rqMsg'), btn = $('rqSend');
+    if (!cat){ msg.innerHTML = '<span style="color:#b3261e">Выберите, что случилось</span>'; return; }
+    btn.disabled = true; btn.textContent = 'Отправляем…';
+    let photo_path = null;
+    try {
+      const f = ($('rqPhoto').files || [])[0];
+      if (f){
+        const ext = (f.name.split('.').pop() || 'jpg').toLowerCase();
+        photo_path = 'requests/' + Date.now() + '-' + Math.random().toString(36).slice(2, 7) + '.' + ext;
+        const up = await ONLINE.client.storage.from('equipment-photos').upload(photo_path, f, { upsert:false });
+        if (up.error){ photo_path = null; }
+      }
+      const payload = {
+        station_id: $('rqStation').value, room_number: $('rqRoom').value.trim(), place: $('rqPlace').value.trim(),
+        category: cat, description: $('rqDesc').value.trim(), source: $('rqSource').value.trim(),
+        photo_path, status: 'новая',
+        created_by: ONLINE.user && ONLINE.user.id, created_email: ONLINE.profile ? ONLINE.profile.email : ''
+      };
+      const { error } = await ONLINE.client.from('requests').insert(payload);
+      if (error) throw new Error(error.message);
+      ov.remove();
+      await loadRequests();
+      alert('Заявка отправлена.');
+      if ($('rqList')) drawRequests();
+    } catch (e) {
+      btn.disabled = false; btn.textContent = 'ОТПРАВИТЬ ЗАЯВКУ';
+      msg.innerHTML = '<span style="color:#b3261e">Не удалось: ' + esc(e.message || String(e)) + '</span>';
+    }
+  };
+  setTimeout(() => { const s = $('rqRoom'); if (s) s.focus(); }, 80);
+}
+function openRequests(){
+  let ov = $('rqList');
+  if (!ov){
+    ov = document.createElement('div');
+    ov.id = 'rqList';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:90;background:#fff;overflow:auto;'
+      + 'padding:16px 16px calc(90px + env(safe-area-inset-bottom, 0px))';
+    document.body.appendChild(ov);
+  }
+  ov.style.display = 'block';
+  drawRequests();
+}
+function drawRequests(){
+  const ov = $('rqList'); if (!ov) return;
+  const q = rqQuery.trim().toLowerCase();
+  const all = ONLINE.requests || [];
+  let list = all;
+  if (rqFilter === 'active') list = all.filter(x => x.status !== 'закрыта' && x.status !== 'отклонена');
+  if (rqFilter === 'new') list = all.filter(x => x.status === 'новая');
+  if (rqFilter === 'work') list = all.filter(x => x.status === 'в работе' || x.status === 'принята');
+  if (rqFilter === 'done') list = all.filter(x => x.status === 'выполнена' || x.status === 'закрыта');
+  if (q) list = list.filter(x => [stationNameOf(x.station_id), x.room_number, x.place, x.category, x.description, x.source]
+    .join(' ').toLowerCase().includes(q));
+  const cnt = (s) => all.filter(x => s.indexOf(x.status) >= 0).length;
+  ov.innerHTML = '<div style="max-width:1150px;margin:0 auto">'
+    + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'
+    + '<h2 style="margin:0;font-size:19px">Заявки</h2>'
+    + '<span class="chip" style="background:#fde8e6;color:#b3261e">новых: ' + cnt(['новая']) + '</span>'
+    + '<span class="chip" style="background:#fff4d6;color:#9a6b00">в работе: ' + cnt(['принята','в работе']) + '</span>'
+    + '<span class="chip" style="background:#e6f5ec;color:#1a7f4b">выполнено: ' + cnt(['выполнена','закрыта']) + '</span>'
+    + '<span style="flex:1"></span>'
+    + (canRequestNow() ? '<button class="btn primary" id="rqAdd">＋ Заявка</button>' : '')
+    + '<button class="btn" id="rqClose">Закрыть</button></div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
+    + '<input id="rqSearch" type="search" value="' + escAttr(rqQuery) + '" placeholder="Поиск: станция, помещение, описание…" style="flex:1;min-width:200px;padding:10px 12px;border:1px solid #cdd7e2;border-radius:10px;font-size:14px">'
+    + ['active|Активные','new|Новые','work|В работе','done|Выполненные','all|Все'].map(s => {
+        const [v, t] = s.split('|');
+        return '<button class="btn ' + (rqFilter === v ? 'primary' : '') + '" data-rf="' + v + '">' + t + '</button>'; }).join('')
+    + '</div>'
+    + (list.length ? list.map(x => {
+        const st = RQ_STATUS[x.status] || x.status;
+        const col = x.status === 'новая' ? '#b3261e' : (x.status === 'в работе' || x.status === 'принята' ? '#9a6b00' : '#1a7f4b');
+        return '<div class="card" style="padding:12px;margin-bottom:8px;border:1px solid var(--border);border-radius:12px">'
+          + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+          + '<b style="font-size:15px">' + esc((RQ_CATS.find(c => c[0] === x.category) || ['', x.category])[1]) + '</b>'
+          + '<span class="chip" style="background:' + col + '22;color:' + col + ';font-weight:600">' + esc(st) + '</span>'
+          + '<span style="flex:1"></span>'
+          + '<span style="color:var(--muted);font-size:12.5px">' + new Date(x.created_at).toLocaleString('ru-RU') + '</span></div>'
+          + '<div style="margin-top:6px;font-size:14px">' + esc(stationNameOf(x.station_id))
+          + (x.room_number ? ' · пом. ' + esc(x.room_number) : '') + (x.place ? ' · ' + esc(x.place) : '') + '</div>'
+          + (x.description ? '<div style="margin-top:4px;font-size:13.5px;color:#41505f">' + esc(x.description) + '</div>' : '')
+          + '<div style="margin-top:4px;font-size:12.5px;color:var(--muted)">сообщил: ' + esc(x.source || '—')
+          + ' · внёс: ' + esc((ONLINE.names && ONLINE.names[String(x.created_email || '').toLowerCase()]) || x.created_email || '—') + '</div>'
+          + (x.photo_path ? '<div style="margin-top:6px"><a href="#" class="rq-photo" data-p="' + escAttr(x.photo_path) + '">📷 фото</a></div>' : '')
+          + '</div>'; }).join('') : '<div class="empty">Заявок нет</div>')
+    + '</div>';
+  $('rqClose').onclick = () => { ov.style.display = 'none'; };
+  const add = $('rqAdd'); if (add) add.onclick = () => openNewRequest();
+  $('rqSearch').oninput = (e) => { rqQuery = e.target.value; const p = e.target.selectionStart; drawRequests(); const n = $('rqSearch'); if (n){ n.focus(); n.setSelectionRange(p, p); } };
+  ov.querySelectorAll('[data-rf]').forEach(b => b.onclick = () => { rqFilter = b.dataset.rf; drawRequests(); });
+  ov.querySelectorAll('.rq-photo').forEach(a => a.onclick = async (e) => {
+    e.preventDefault();
+    const { data } = ONLINE.client.storage.from('equipment-photos').getPublicUrl(a.dataset.p);
+    if (data && data.publicUrl) window.open(data.publicUrl, '_blank');
+  });
+}
+function ensureRequestButton(){
+  const anchor = $('btnTO') || $('btnIn') || $('btnOut');
+  const place = (typeof barHost === 'function') ? barHost() : null;
+  if ($('btnRQ') || !place) return;
+  const b = document.createElement('button');
+  b.id = 'btnRQ';
+  b.className = (place.before && place.before.className) || 'btn';
+  b.textContent = 'Заявки';
+  b.onclick = openRequests;
+  if (place.before) place.host.insertBefore(b, place.before); else place.host.appendChild(b);
+}
+
 /* ============ этап 3: помещения ============ */
 ONLINE.roomsDb = Object.create(null);
 ONLINE.roomClasses = Object.create(null);
@@ -4953,6 +5134,7 @@ function ensureAllButtons(){
   try { ensureTOButton(); } catch (e) {}
   try { ensureHelpButton(); } catch (e) {}
   try { ensureEditButton(); } catch (e) {}
+  try { ensureRequestButton(); } catch (e) {}
   try { ensureOnlineChip(); } catch (e) {}
 }
 ensureAllButtons();
