@@ -479,7 +479,7 @@
 <footer>
   <span style="flex:1"></span>
   <span id="sourceNote"></span>
-  <span id="verTag" style="margin-left:10px;opacity:.55">версия 65 — тоннель в технических помещениях</span>
+  <span id="verTag" style="margin-left:10px;opacity:.55">версия 65 — тоннел|туннель в технических помещениях</span>
 </footer>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -1891,7 +1891,8 @@ const OUTDOOR_RE = /вент|кровл|крыш|фасад|сбойк|ниш|п
 const VK_RE = /(^|[\s.,(№-])вк([\d\s.,)-]|$)/i;
 function isOutdoorPlace(place, number){
   const t = `${place || ''} ${number || ''}`;
-  return OUTDOOR_RE.test(t) || VK_RE.test(t);
+  const t2 = String(place || '') + ' ' + String(number || '');
+  return OUTDOOR_RE.test(t) || VK_RE.test(t) || OUTDOOR_RE.test(t2) || VK_RE.test(t2);
 }
 function normGroupName(name, place, number){
   return isOutdoorPlace(place, number) ? OUTDOOR_GROUP : (name || 'Служебные помещения');
@@ -2062,11 +2063,21 @@ function openAuthPassword(email){
     let r = null, lastMsg = '';
     for (let i = 0; i < 3; i++){
       try {
-        r = await ONLINE.client.auth.signInWithPassword({ email: em, password: pw });
+        r = await Promise.race([
+          ONLINE.client.auth.signInWithPassword({ email: em, password: pw }),
+          new Promise(res => setTimeout(() => res({ error: { message: '__timeout__' } }), 20000))
+        ]);
+        if (r && r.error && r.error.message === '__timeout__') throw new Error('timeout');
         if (!r.error) break;
         lastMsg = String(r.error.message || '');
         if (!/load failed|failed to fetch|network|timeout/i.test(lastMsg)) break;
-      } catch (e) { lastMsg = e.message || String(e); }
+      } catch (e) {
+        lastMsg = (e && e.message === 'timeout') ? 'timeout' : (e.message || String(e));
+        if (lastMsg === 'timeout'){
+          mBody.insertAdjacentHTML('beforeend', `<div class="empty" id="pwWait">Сервер не ответил за 20 секунд. Пробуем ещё раз…</div>`);
+          const w = $('pwWait'); await new Promise(res => setTimeout(res, 1200)); if (w) w.remove();
+        }
+      }
       if (i < 2){
         mBody.insertAdjacentHTML('beforeend', `<div class="empty" id="pwWait">Связь прервалась, пробуем ещё раз… (попытка ${i + 2} из 3)</div>`);
         const w = $('pwWait');
